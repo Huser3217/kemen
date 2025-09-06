@@ -124,9 +124,11 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     """
     # 输入验证
     if hatch_corners_refined is None or len(hatch_corners_refined) == 0:
+        logger.warning("输入的船舱口顶点为空")
         return np.array([])
     
     if original_points.shape[1] < 4:
+        logger.warning("输入的原始点云数据维度不足4")
         return np.array([])
     
     # 1. 计算船舱四个顶点的x坐标平均值
@@ -186,6 +188,7 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 4. 合并两部分点云
     if len(part_one) == 0 and len(processed_part_two) == 0:
+        logger.warning("合并后的点云数据为空")
         return np.array([])
     elif len(part_one) == 0:
         combined_points_for_clustering = processed_part_two
@@ -196,6 +199,7 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 5. 对合并后的点云进行DBSCAN聚类
     if len(combined_points_for_clustering) == 0:
+        logger.warning("合并后的点云数据为空，无法进行聚类")
         return np.array([])
     
     # HDBSCAN聚类参数
@@ -211,6 +215,7 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     unique_labels_coal, counts_coal = np.unique(labels_coal_cluster[labels_coal_cluster != -1], return_counts=True)
     
     if len(unique_labels_coal) == 0:
+        logger.warning("聚类结果为空，无法找到最大聚类")
         return np.array([])
     
     # 返回最大聚类的点
@@ -228,7 +233,7 @@ URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIIQ II QQ II 12d 12d"
+HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -330,15 +335,15 @@ async def parse_point_cloud_data(data: bytes):
     解析接收到的二进制点云数据。
     """
     if len(data) < HEADER_SIZE:
-        print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
+        # print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
+        logger.warning(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
         return None
 
     # 1. 解析头部
     try:
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
-                magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
-                current_machine_position,
+                magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
                 corner1_x, corner1_y, corner1_z,
@@ -352,7 +357,8 @@ async def parse_point_cloud_data(data: bytes):
                 world_corner4_x, world_corner4_y, world_corner4_z
             ) = header_data
     except struct.error as e:
-        print(f"解析头部失败: {e}")
+        # print(f"解析头部失败: {e}")
+        logger.warning(f"解析头部失败: {e}")
         return None
 
     # 验证魔术字
@@ -443,7 +449,8 @@ async def get_point_cloud_from_websocket_persistent():
     global ws_manager
     
     if not ws_manager:
-        print("WebSocket管理器未初始化")
+        # print("WebSocket管理器未初始化")
+        logger.warning("WebSocket管理器未初始化")
         return None
     
     # print("等待接收点云数据...")
@@ -451,7 +458,8 @@ async def get_point_cloud_from_websocket_persistent():
     while True:
         message = await ws_manager.receive_message()
         if message is None:
-            print("接收消息失败")
+            # print("接收消息失败")
+            logger.warning("接收消息失败")
             return None
         
         # 检查是否为二进制数据
@@ -742,8 +750,8 @@ async def main():
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
             world_corners = header_info.get('world_corners', {})
-            if current_step != 5:
-                # print("当前步骤不是5，跳过处理")    
+            if current_step != 1:
+                # print("当前计算信号不是1，跳过处理")    
                 continue
              # 将角点数据转换为numpy数组格式 (4, 3)
             hatch_corners_refined = np.array([
@@ -793,7 +801,7 @@ async def main():
                 # 发送煤堆数据到WebSocket服务器
             else:
                 # print("未检测到煤堆")
-                logger.info("未检测到煤堆")
+                logger.warning("未检测到煤堆")
             
     except KeyboardInterrupt:
         # print("\n程序被用户中断")

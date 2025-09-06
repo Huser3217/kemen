@@ -228,7 +228,7 @@ URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIIQ II QQ II 12d 12d"
+HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -735,8 +735,8 @@ async def main():
             current_hatch = header_info.get('current_hatch', 0)
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
-            if current_step != 5:
-                # print("当前步骤不是5，跳过处理")    
+            if current_step != 1:
+                # print("当前计算信号不是1，跳过处理")    
                 continue
              # 将角点数据转换为numpy数组格式 (4, 3)
             hatch_corners_refined = np.array([

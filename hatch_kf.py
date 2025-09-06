@@ -402,6 +402,7 @@ def get_two_largest_clusters(points, labels, min_area=300.0):
     # 根据筛选结果决定返回哪个（或哪些）聚类
     if len(qualified_clusters) == 0:
         # print(f"\n警告：最大的{num_clusters_to_check}个聚类都不满足面积要求。")
+        logging.warning(f"获取最大聚类: 最大的{num_clusters_to_check}个聚类都不满足面积要求。")
         return np.array([]) # 没有聚类满足要求，返回空数组
     elif len(qualified_clusters) == 1:
         # print(f"\n只有1个聚类满足面积要求: 包含 {len(qualified_clusters[0])} 个点。")
@@ -488,6 +489,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
     
     if len(filtered_points) < 4:
         # print("点云数据不足，无法检测矩形")
+        logging.warning("点云数据不足，无法检测矩形")
         return None
     
     # 提取YZ投影点
@@ -1030,6 +1032,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
             #使用真实船舱中心转换成雷达坐标。
             center_pixel_y = int((radar_center_y - min_yz[0]) / pixel_size)
             center_pixel_z = int((radar_center_z - min_yz[1]) / pixel_size)
+            logging.info(f"雷达中心转换为像素坐标: ({center_pixel_y}, {center_pixel_z})")
 
               # 确保中心点在图像范围内
             center_pixel_y, center_pixel_z = clamp_point(center_pixel_y, center_pixel_z, grid_width, grid_height)
@@ -1246,6 +1249,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
     
     #
     # return rectangle_corners_yz
+    logging.warning("未找到满足要求的矩形")
     return None
 
 def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity, points_for_yz_refinement, refined_corners_yz, visualize_ranges=True):
@@ -1847,7 +1851,7 @@ URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIIQ II QQ II 12d 12d"
+HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -1911,6 +1915,7 @@ class WebSocketManager:
     async def receive_message(self):
         """接收WebSocket消息"""
         if not await self.ensure_connected():
+            logging.error("确保连接处于活跃状态失败")
             return None
         
         try:
@@ -1921,7 +1926,7 @@ class WebSocketManager:
             self.is_connected = False
             return None
         except Exception as e:
-            print(f"接收消息时出错: {e}")
+            logging.error(f"接收消息时出错: {e}")
             return None
     
     async def send_message(self, message):
@@ -1948,7 +1953,7 @@ async def parse_point_cloud_data(data: bytes):
     解析接收到的二进制点云数据。
     """
     if len(data) < HEADER_SIZE:
-        print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
+        logging.warning(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
         return None
 
     # 1. 解析头部
@@ -1970,7 +1975,7 @@ async def parse_point_cloud_data(data: bytes):
                 world_corner4_x, world_corner4_y, world_corner4_z
             ) = header_data
     except struct.error as e:
-        print(f"解析头部失败: {e}")
+        logging.error(f"解析头部失败: {e}")
         return None
 
     # 验证魔术字
@@ -2397,17 +2402,17 @@ async def main():
                hatch_corner3['x'] == 0 and hatch_corner3['y'] == 0 and hatch_corner3['z'] == 0 and \
                hatch_corner4['x'] == 0 and hatch_corner4['y'] == 0 and hatch_corner4['z'] == 0:
 
-
                 IS_FIRST_TIME=True
                 radar_center_x,radar_center_y,radar_center_z=0, 0,0
-
+                logging.info("这是第一次识别，雷达中心坐标为(0,0,0)")
             else:
                 #矩形的中心世界坐标转为雷达坐标系中
 
                 world_point = np.array([
                [world_center_x,world_center_y,world_center_z]])
+
                 radar_center_x, radar_center_y, radar_center_z = world_to_lidar_with_x(world_point,translation,rotation_angles)[0]
-                 
+                logging.info(f"矩形中心世界坐标({world_center_x},{world_center_y},{world_center_z})转换为雷达坐标({radar_center_x},{radar_center_y},{radar_center_z})")
             if is_detection_hatch != 1:
                 # print("跳过舱口识别流程 (is_detection_hatch != 1)")
                 continue
@@ -2466,6 +2471,7 @@ async def main():
             x2, y2, z2 = hatch_corners_refined[1]
             x3, y3, z3 = hatch_corners_refined[2]
             x4, y4, z4 = hatch_corners_refined[3]
+            logging.info(f"最终检测到的3D顶点坐标 (X, Y, Z):({x1},{y1},{z1}),(x2,y2,z2),(x3,y3,z3),(x4,y4,z4)")
             
             points_lidar = np.array([
                 [x1, y1, z1],  # 第一个点
@@ -2478,9 +2484,9 @@ async def main():
             # points_world =lidar_to_world_transform(points_lidar)
             points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
 
-            print("世界坐标系下的点：")
+            logging.info("世界坐标系下的点：")
             for i, (x, y, z) in enumerate(points_world):
-                print(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")
+                logging.info(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")
             
            
             
