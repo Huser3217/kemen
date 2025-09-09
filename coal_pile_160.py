@@ -48,6 +48,82 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- 辅助可视化函数：3D点云可视化 ---
+def visualize_pcd_3d(points, title="3D Point Cloud", colors=None):
+    """
+    可视化3D点云。
+
+    Args:
+        points (np.array): 输入的点云数组，形状为 (N, 3)，N为点数，3为X,Y,Z坐标。
+                           注意：此函数期望N,3的数组。
+        title (str): 可视化窗口的标题。
+        colors (np.array, optional): 点云的颜色数组，形状为 (N, 3)，RGB值在[0,1]之间。
+                                     如果为None，则根据X坐标（通常代表深度）进行着色。
+    """
+    # 检查点云是否为空
+    if len(points) == 0:
+        print(f"警告: 无法可视化 '{title}'，因为点云为空。")
+        return
+
+    # 创建Open3D点云对象
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points) # 将numpy数组转换为Open3D的Vector3dVector
+
+    if colors is None:
+        # 如果未提供颜色，则根据X坐标（深度）进行着色
+        x_coords = points[:, 0]
+        # 归一化X坐标到[0, 1]范围，以便应用于颜色映射
+        # 避免除以零或非常小的数，以防所有X坐标相同
+        if np.max(x_coords) - np.min(x_coords) > 1e-6:
+            norm_x = (x_coords - np.min(x_coords)) / (np.max(x_coords) - np.min(x_coords))
+        else:
+            norm_x = np.zeros_like(x_coords) # 如果所有X坐标相同，则统一设置为0
+        # 使用'viridis'颜色映射，并将结果的RGB部分作为点云颜色
+        pcd.colors = o3d.utility.Vector3dVector(cm.get_cmap('viridis')(norm_x)[:,:3])
+    else:
+        # 如果提供了颜色，则直接使用
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    print(f"正在显示 '{title}' 的3D可视化...")
+    # 绘制点云
+    o3d.visualization.draw_geometries([pcd], window_name=title, width=1024, height=768)
+
+
+def visualize_clustered_pcd(points, labels, title="HDBSCAN Clustered Point Cloud"):
+    """
+    可视化DBSCAN聚类结果，不同聚类用不同颜色，噪声点用灰色。
+
+    Args:
+        points (np.array): 输入的点云数组，形状为 (N, 3)。
+        labels (np.array): 聚类标签数组，形状为 (N,)，-1表示噪声点，其他非负整数表示聚类ID。
+        title (str): 可视化窗口的标题。
+    """
+    # 检查点云是否为空
+    if len(points) == 0:
+        print(f"警告: 无法可视化 '{title}'，因为点云为空。")
+        return
+
+    # 初始化颜色数组，所有点默认颜色为黑色（或不设置，稍后会被覆盖）
+    colors = np.zeros((points.shape[0], 3))
+    # 获取所有独特的聚类标签
+    unique_labels = np.unique(labels)
+
+    # 获取颜色映射，例如tab20，它有20种不同的颜色，适合区分多个聚类
+    cmap = cm.get_cmap('tab20')
+
+    # 为每个聚类分配颜色
+    for label_idx, label in enumerate(unique_labels):
+        if label == -1: # 如果是噪声点
+            colors[labels == label] = [0.5, 0.5, 0.5] # 分配灰色
+        else:
+            # 为每个有效聚类分配一个颜色
+            # 使用取模运算以防聚类数量超过颜色映射的颜色数量，确保颜色循环使用
+            cluster_color = cmap(label_idx % cmap.N)[:3]
+            colors[labels == label] = cluster_color
+
+    # 调用通用3D点云可视化函数显示带颜色的聚类结果
+    visualize_pcd_3d(points, title=title, colors=colors)
+
 def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=False):
     """
     
@@ -66,30 +142,30 @@ def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=Fals
     # print(f"处理 {len(points):,} 个点")
     
     # 关键参数设置
-    clusterer = hdbscan.HDBSCAN(
-        # 核心参数：模拟DBSCAN的eps效果
-        cluster_selection_epsilon=eps,  # 等效eps
+    # clusterer = hdbscan.HDBSCAN(
+    #     # 核心参数：模拟DBSCAN的eps效果
+    #     cluster_selection_epsilon=eps,  # 等效eps
         
-        # 最小样本数：与DBSCAN相同
-        min_samples=min_samples,
+    #     # 最小样本数：与DBSCAN相同
+    #     min_samples=min_samples,
         
-        # 最小聚类大小：通常设为min_samples的2-3倍
-        min_cluster_size=min_samples * 2,  
+    #     # 最小聚类大小：通常设为min_samples的2-3倍
+    #     min_cluster_size=min_samples * 2,  
         
-        # 算法选择
-        algorithm='best',  # 自动选择最优算法
+    #     # 算法选择
+    #     algorithm='best',  # 自动选择最优算法
         
-        # 聚类选择方法
-        cluster_selection_method='eom',  # 超额质量方法，更稳定
+    #     # 聚类选择方法
+    #     cluster_selection_method='leaf', 
         
-        # 性能优化
-        core_dist_n_jobs=-1,  # 并行计算核心距离
+    #     # 性能优化
+    #     core_dist_n_jobs=-1,  # 并行计算核心距离
         
-        # 其他重要参数
-        allow_single_cluster=False,  # 不允许单一聚类
-        prediction_data=True  # 启用预测数据，用于后续分析
-    )
-    
+    #     # 其他重要参数
+    #     allow_single_cluster=False,  # 不允许单一聚类
+    #     prediction_data=True  # 启用预测数据，用于后续分析
+    # )
+    clusterer = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1)
     start_time = time.time()
     labels = clusterer.fit_predict(points.astype(np.float32))
     end_time = time.time()
@@ -109,7 +185,7 @@ def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=Fals
                               title=f"HDBSCAN聚类 (等效eps={eps}, {n_clusters}个聚类)")
     return labels
 # --- 分割煤堆 ---
-def segment_coal_pile(original_points, hatch_corners_refined):
+def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=False):
 
   
     """
@@ -124,9 +200,11 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     """
     # 输入验证
     if hatch_corners_refined is None or len(hatch_corners_refined) == 0:
+        logging.error("输入的船舱口顶点为空，无法进行分割。")
         return np.array([])
     
     if original_points.shape[1] < 4:
+        logging.error("输入的点云数据维度不足，无法进行分割。")
         return np.array([])
     
     # 1. 计算船舱四个顶点的x坐标平均值
@@ -186,6 +264,7 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 4. 合并两部分点云
     if len(part_one) == 0 and len(processed_part_two) == 0:
+        logging.error("两部分的点云都为空")
         return np.array([])
     elif len(part_one) == 0:
         combined_points_for_clustering = processed_part_two
@@ -196,8 +275,11 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 5. 对合并后的点云进行DBSCAN聚类
     if len(combined_points_for_clustering) == 0:
+        logging.error("合并后的点云数据为空，无法进行聚类。")
         return np.array([])
     
+
+
     # HDBSCAN聚类参数
     hdbscan_eps_coal = 1
     hdbscan_min_samples_coal = 20
@@ -205,12 +287,13 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     # 执行聚类（只使用XYZ坐标）
     labels_coal_cluster = cluster_points_dbscan(combined_points_for_clustering[:, :3], 
                                                 eps=hdbscan_eps_coal, 
-                                                min_samples=hdbscan_min_samples_coal,visualize_hdbscan=False)
+                                                min_samples=hdbscan_min_samples_coal,visualize_hdbscan=visualize_hdbscan)
     
     # 找到点数最多的聚类（排除噪声点-1）
     unique_labels_coal, counts_coal = np.unique(labels_coal_cluster[labels_coal_cluster != -1], return_counts=True)
     
     if len(unique_labels_coal) == 0:
+        logging.error("聚类结果为空，无法找到最大聚类。")
         return np.array([])
     
     # 返回最大聚类的点
@@ -222,8 +305,8 @@ def segment_coal_pile(original_points, hatch_corners_refined):
 # WebSocket服务器配置
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 27052
-SERVER_PATH = "/point-cloud"
-USER_ID = "coal-pile-detector"
+SERVER_PATH = "/point-cloud-160"
+USER_ID = "coal-pile-detector-160"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
@@ -574,6 +657,12 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
                 "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                 "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                 "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+            },
+            "world_corners": {
+                "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
+                "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
+                "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
+                "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
             }
         }
         
@@ -700,7 +789,7 @@ async def main():
     # 初始化WebSocket管理器
     ws_manager = WebSocketManager(URI,5,1)
     # 初始化广播服务器
-    broadcast_server = CoalPileBroadcastServer(host="127.0.0.1", port=8765)
+    broadcast_server = CoalPileBroadcastServer(host="127.0.0.1", port=8766)
     
  # 启动广播服务器
     try:
@@ -717,13 +806,7 @@ async def main():
         return
     
     try:
-        USE_CLUSTERING = False    #控制是否使用聚类
-        VIS_ORIGINAL_3D = False  # 可视化原始点云
-        VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
-        VISUALIZE_HDBSCAN = False      # 可视化HDBSCAN聚类结果
-        VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
-        VISUALIZE_FINAL_RESULT = False  # 可视化最终结果
-
+        visualize_clustered_pcd = True  # 可视化聚类后的结果
         while True:
             # print("=== 从WebSocket获取点云数据 ===")
             original_points, header_info = await get_point_cloud_from_websocket_persistent()
@@ -735,6 +818,7 @@ async def main():
             current_hatch = header_info.get('current_hatch', 0)
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
+            world_corners = header_info.get('world_corners', {})
             if current_step != 1:
                 # print("当前计算信号不是1，跳过处理")    
                 continue
@@ -746,7 +830,7 @@ async def main():
                 [hatch_corners['corner4']['x'], hatch_corners['corner4']['y'], hatch_corners['corner4']['z']]
             ], dtype=np.float32)
 
-            coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined)
+            coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
             if len(coal_pile_points) > 0:
                 # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
                  # 构造煤堆数据
@@ -760,6 +844,12 @@ async def main():
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                         "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                         "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+                    },
+                    "world_corners": {
+                        "corner1": {"x": float(world_corners['corner1']['x']), "y": float(world_corners['corner1']['y']), "z": float(world_corners['corner1']['z'])},
+                        "corner2": {"x": float(world_corners['corner2']['x']), "y": float(world_corners['corner2']['y']), "z": float(world_corners['corner2']['z'])},
+                        "corner3": {"x": float(world_corners['corner3']['x']), "y": float(world_corners['corner3']['y']), "z": float(world_corners['corner3']['z'])},
+                        "corner4": {"x": float(world_corners['corner4']['x']), "y": float(world_corners['corner4']['y']), "z": float(world_corners['corner4']['z'])}
                     }
                 }
                 # 添加煤堆点云数据
@@ -769,12 +859,14 @@ async def main():
                         "x": float(point[0]),
                         "y": float(point[1]),
                         "z": float(point[2]),
-                        "intensity": float(point[3]) if len(point) > 3 else 0.0
+                        #"intensity": float(point[3]) if len(point) > 3 else 0.0
                     })
                 coal_pile_data["coal_pile_points"] = points_list
                 
                 # 广播煤堆数据到所有客户端
+                
                 await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                # visualize_pcd_3d(coal_pile_points[:, :3])
                 print(f"煤堆数据已广播到所有连接的客户端")
                 # 发送煤堆数据到WebSocket服务器
             else:

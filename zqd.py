@@ -22,6 +22,10 @@ import struct
 import binascii
 from datetime import datetime
 import warnings
+import math
+
+
+from config import config
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -48,6 +52,82 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- 辅助可视化函数：3D点云可视化 ---
+def visualize_pcd_3d(points, title="3D Point Cloud", colors=None):
+    """
+    可视化3D点云。
+
+    Args:
+        points (np.array): 输入的点云数组，形状为 (N, 3)，N为点数，3为X,Y,Z坐标。
+                           注意：此函数期望N,3的数组。
+        title (str): 可视化窗口的标题。
+        colors (np.array, optional): 点云的颜色数组，形状为 (N, 3)，RGB值在[0,1]之间。
+                                     如果为None，则根据X坐标（通常代表深度）进行着色。
+    """
+    # 检查点云是否为空
+    if len(points) == 0:
+        print(f"警告: 无法可视化 '{title}'，因为点云为空。")
+        return
+
+    # 创建Open3D点云对象
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points) # 将numpy数组转换为Open3D的Vector3dVector
+
+    if colors is None:
+        # 如果未提供颜色，则根据X坐标（深度）进行着色
+        x_coords = points[:, 0]
+        # 归一化X坐标到[0, 1]范围，以便应用于颜色映射
+        # 避免除以零或非常小的数，以防所有X坐标相同
+        if np.max(x_coords) - np.min(x_coords) > 1e-6:
+            norm_x = (x_coords - np.min(x_coords)) / (np.max(x_coords) - np.min(x_coords))
+        else:
+            norm_x = np.zeros_like(x_coords) # 如果所有X坐标相同，则统一设置为0
+        # 使用'viridis'颜色映射，并将结果的RGB部分作为点云颜色
+        pcd.colors = o3d.utility.Vector3dVector(cm.get_cmap('viridis')(norm_x)[:,:3])
+    else:
+        # 如果提供了颜色，则直接使用
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    print(f"正在显示 '{title}' 的3D可视化...")
+    # 绘制点云
+    o3d.visualization.draw_geometries([pcd], window_name=title, width=1024, height=768)
+
+
+def visualize_clustered_pcd(points, labels, title="HDBSCAN Clustered Point Cloud"):
+    """
+    可视化DBSCAN聚类结果，不同聚类用不同颜色，噪声点用灰色。
+
+    Args:
+        points (np.array): 输入的点云数组，形状为 (N, 3)。
+        labels (np.array): 聚类标签数组，形状为 (N,)，-1表示噪声点，其他非负整数表示聚类ID。
+        title (str): 可视化窗口的标题。
+    """
+    # 检查点云是否为空
+    if len(points) == 0:
+        print(f"警告: 无法可视化 '{title}'，因为点云为空。")
+        return
+
+    # 初始化颜色数组，所有点默认颜色为黑色（或不设置，稍后会被覆盖）
+    colors = np.zeros((points.shape[0], 3))
+    # 获取所有独特的聚类标签
+    unique_labels = np.unique(labels)
+
+    # 获取颜色映射，例如tab20，它有20种不同的颜色，适合区分多个聚类
+    cmap = cm.get_cmap('tab20')
+
+    # 为每个聚类分配颜色
+    for label_idx, label in enumerate(unique_labels):
+        if label == -1: # 如果是噪声点
+            colors[labels == label] = [0.5, 0.5, 0.5] # 分配灰色
+        else:
+            # 为每个有效聚类分配一个颜色
+            # 使用取模运算以防聚类数量超过颜色映射的颜色数量，确保颜色循环使用
+            cluster_color = cmap(label_idx % cmap.N)[:3]
+            colors[labels == label] = cluster_color
+
+    # 调用通用3D点云可视化函数显示带颜色的聚类结果
+    visualize_pcd_3d(points, title=title, colors=colors)
+
 def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=False):
     """
     
@@ -66,30 +146,30 @@ def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=Fals
     # print(f"处理 {len(points):,} 个点")
     
     # 关键参数设置
-    clusterer = hdbscan.HDBSCAN(
-        # 核心参数：模拟DBSCAN的eps效果
-        cluster_selection_epsilon=eps,  # 等效eps
+    # clusterer = hdbscan.HDBSCAN(
+    #     # 核心参数：模拟DBSCAN的eps效果
+    #     cluster_selection_epsilon=eps,  # 等效eps
         
-        # 最小样本数：与DBSCAN相同
-        min_samples=min_samples,
+    #     # 最小样本数：与DBSCAN相同
+    #     min_samples=min_samples,
         
-        # 最小聚类大小：通常设为min_samples的2-3倍
-        min_cluster_size=min_samples * 2,  
+    #     # 最小聚类大小：通常设为min_samples的2-3倍
+    #     min_cluster_size=min_samples * 2,  
         
-        # 算法选择
-        algorithm='best',  # 自动选择最优算法
+    #     # 算法选择
+    #     algorithm='best',  # 自动选择最优算法
         
-        # 聚类选择方法
-        cluster_selection_method='eom',  # 超额质量方法，更稳定
+    #     # 聚类选择方法
+    #     cluster_selection_method='leaf', 
         
-        # 性能优化
-        core_dist_n_jobs=-1,  # 并行计算核心距离
+    #     # 性能优化
+    #     core_dist_n_jobs=-1,  # 并行计算核心距离
         
-        # 其他重要参数
-        allow_single_cluster=False,  # 不允许单一聚类
-        prediction_data=True  # 启用预测数据，用于后续分析
-    )
-    
+    #     # 其他重要参数
+    #     allow_single_cluster=False,  # 不允许单一聚类
+    #     prediction_data=True  # 启用预测数据，用于后续分析
+    # )
+    clusterer = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1)
     start_time = time.time()
     labels = clusterer.fit_predict(points.astype(np.float32))
     end_time = time.time()
@@ -109,7 +189,7 @@ def cluster_points_dbscan(points, eps=0.6, min_samples=5, visualize_hdbscan=Fals
                               title=f"HDBSCAN聚类 (等效eps={eps}, {n_clusters}个聚类)")
     return labels
 # --- 分割煤堆 ---
-def segment_coal_pile(original_points, hatch_corners_refined):
+def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=False):
 
   
     """
@@ -124,11 +204,9 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     """
     # 输入验证
     if hatch_corners_refined is None or len(hatch_corners_refined) == 0:
-        logger.warning("输入的船舱口顶点为空")
         return np.array([])
     
     if original_points.shape[1] < 4:
-        logger.warning("输入的原始点云数据维度不足4")
         return np.array([])
     
     # 1. 计算船舱四个顶点的x坐标平均值
@@ -188,7 +266,6 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 4. 合并两部分点云
     if len(part_one) == 0 and len(processed_part_two) == 0:
-        logger.warning("合并后的点云数据为空")
         return np.array([])
     elif len(part_one) == 0:
         combined_points_for_clustering = processed_part_two
@@ -199,9 +276,10 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     
     # 5. 对合并后的点云进行DBSCAN聚类
     if len(combined_points_for_clustering) == 0:
-        logger.warning("合并后的点云数据为空，无法进行聚类")
         return np.array([])
     
+   # 对combined_points_for_clustering进行离群点滤波
+
     # HDBSCAN聚类参数
     hdbscan_eps_coal = 1
     hdbscan_min_samples_coal = 20
@@ -209,13 +287,12 @@ def segment_coal_pile(original_points, hatch_corners_refined):
     # 执行聚类（只使用XYZ坐标）
     labels_coal_cluster = cluster_points_dbscan(combined_points_for_clustering[:, :3], 
                                                 eps=hdbscan_eps_coal, 
-                                                min_samples=hdbscan_min_samples_coal,visualize_hdbscan=False)
+                                                min_samples=hdbscan_min_samples_coal,visualize_hdbscan=visualize_hdbscan)
     
     # 找到点数最多的聚类（排除噪声点-1）
     unique_labels_coal, counts_coal = np.unique(labels_coal_cluster[labels_coal_cluster != -1], return_counts=True)
     
     if len(unique_labels_coal) == 0:
-        logger.warning("聚类结果为空，无法找到最大聚类")
         return np.array([])
     
     # 返回最大聚类的点
@@ -227,7 +304,7 @@ def segment_coal_pile(original_points, hatch_corners_refined):
 # WebSocket服务器配置
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 27052
-SERVER_PATH = "/point-cloud"
+SERVER_PATH = "/point-cloud-170"
 USER_ID = "coal-pile-detector"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
@@ -335,15 +412,15 @@ async def parse_point_cloud_data(data: bytes):
     解析接收到的二进制点云数据。
     """
     if len(data) < HEADER_SIZE:
-        # print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
-        logger.warning(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
+        print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
         return None
 
     # 1. 解析头部
     try:
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
-                magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,current_machine_position,
+                magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
+                current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
                 corner1_x, corner1_y, corner1_z,
@@ -357,8 +434,7 @@ async def parse_point_cloud_data(data: bytes):
                 world_corner4_x, world_corner4_y, world_corner4_z
             ) = header_data
     except struct.error as e:
-        # print(f"解析头部失败: {e}")
-        logger.warning(f"解析头部失败: {e}")
+        print(f"解析头部失败: {e}")
         return None
 
     # 验证魔术字
@@ -449,8 +525,7 @@ async def get_point_cloud_from_websocket_persistent():
     global ws_manager
     
     if not ws_manager:
-        # print("WebSocket管理器未初始化")
-        logger.warning("WebSocket管理器未初始化")
+        print("WebSocket管理器未初始化")
         return None
     
     # print("等待接收点云数据...")
@@ -458,8 +533,7 @@ async def get_point_cloud_from_websocket_persistent():
     while True:
         message = await ws_manager.receive_message()
         if message is None:
-            # print("接收消息失败")
-            logger.warning("接收消息失败")
+            print("接收消息失败")
             return None
         
         # 检查是否为二进制数据
@@ -582,12 +656,6 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
                 "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                 "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                 "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
-            },
-            "world_corners": {
-                "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
-                "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
-                "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
-                "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
             }
         }
         
@@ -705,6 +773,95 @@ class CoalPileBroadcastServer:
         logger.info(f"广播服务器已启动，等待客户端连接...")
         return self.server
 
+
+def lidar_to_world_with_x(points_lidar, translation, actual_x, rotation_angles=[0, 0, 0], degrees=True):
+    """
+    将激光雷达坐标系下的点转换到实际坐标系，并加入实际x值
+
+    参数:
+        points_lidar: Nx3 numpy数组，激光雷达坐标系下的点云 (x, y, z)
+        translation: 3元素列表/数组，激光雷达中心在实际坐标系中的位置 [tx, ty, tz]
+        actual_x: 实际x值，将加入到平移矩阵中
+        rotation_angles: 3元素列表/数组，安装角度 [roll, pitch, yaw]（默认单位：度）
+        degrees: 是否为角度制（True），False则为弧度制
+
+    返回:
+        Nx3 numpy数组，实际坐标系下的点云
+    """
+
+    points_lidar = np.asarray(points_lidar)
+    if points_lidar.ndim == 1:  # 兼容单个点
+        points_lidar = points_lidar[np.newaxis, :]
+
+    # 1) 轴向置换矩阵：把 L 系 (x,y,z) 映射到与 W 系轴向一致
+    #    [Lz,  Ly, -Lx]  -> [Wx, Wy, Wz]
+    P = np.array([[0, 0, 1],   # Wx =  Lz
+                  [0, 1, 0],   # Wy =  Ly
+                  [-1, 0, 0]]) # Wz = -Lx
+
+    # 2) 安装角：支持三个轴的旋转 (roll, pitch, yaw)
+    # 用户可以自己调整这三个角度
+    R_install = R.from_euler('xyz', rotation_angles, degrees=degrees).as_matrix()
+
+    # 3) 组合旋转：先轴向置换，再安装角
+    R_total = R_install @ P
+
+    # 4) 平移向量，加入实际x值
+    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
+
+    # 5) 转换
+    points_world = (R_total @ points_lidar.T) + T
+    return points_world.T
+
+
+
+def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[0, 0, 0], degrees=True):
+    """
+    将实际坐标系下的点转换到激光雷达坐标系，并减去实际x值
+
+    参数:
+        points_world: Nx3 numpy数组，实际坐标系下的点云 (x, y, z)
+        translation: 3元素列表/数组，激光雷达中心在实际坐标系中的位置 [tx, ty, tz]
+        actual_x: 实际x值，将从平移矩阵中减去
+        rotation_angles: 3元素列表/数组，安装角度 [roll, pitch, yaw]（默认单位：度）
+        degrees: 是否为角度制（True），False则为弧度制
+
+    返回:
+        Nx3 numpy数组，激光雷达坐标系下的点云
+    """
+    
+    points_world = np.asarray(points_world)
+    if points_world.ndim == 1:  # 兼容单个点
+        points_world = points_world[np.newaxis, :]
+    
+    # 1) 轴向置换矩阵：把 L 系 (x,y,z) 映射到与 W 系轴向一致
+    #    [Lz,  Ly, -Lx]  -> [Wx, Wy, Wz]
+    P = np.array([[0, 0, 1],   # Wx =  Lz
+                  [0, 1, 0],   # Wy =  Ly
+                  [-1, 0, 0]]) # Wz = -Lx
+    
+    # 2) 安装角：支持三个轴的旋转 (roll, pitch, yaw)
+    R_install = R.from_euler('xyz', rotation_angles, degrees=degrees).as_matrix()
+    
+    # 3) 组合旋转：先轴向置换，再安装角
+    R_total = R_install @ P
+    
+    # 4) 平移向量，加入实际x值
+    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
+    
+    # 5) 逆向转换：先减去平移，再应用逆旋转
+    # 逆旋转矩阵是原旋转矩阵的转置
+    R_total_inv = R_total.T
+    
+    # 减去平移向量
+    points_translated = points_world.T - T
+    
+    # 应用逆旋转
+    points_lidar = R_total_inv @ points_translated
+    
+    return points_lidar.T
+
+
 # 全局广播服务器实例
 broadcast_server = None
 
@@ -730,13 +887,20 @@ async def main():
         print("无法建立WebSocket连接，程序退出")
         return
     
+    # 定义一个变量来存储换线方向
+    # 1: 沿X轴正方向换线 (编号增加的方向)
+    # -1: 沿X轴负方向换线 (编号减少的方向)
+    persisted_line_change_direction = -1 
+
     try:
-        USE_CLUSTERING = False    #控制是否使用聚类
-        VIS_ORIGINAL_3D = False  # 可视化原始点云
-        VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
-        VISUALIZE_HDBSCAN = False      # 可视化HDBSCAN聚类结果
-        VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
-        VISUALIZE_FINAL_RESULT = False  # 可视化最终结果
+        visualize_clustered_pcd = False  # 可视化聚类后的结果
+       
+        # 安装参数
+        translation = [3.725, 24.324, 31.4]
+            
+            # 旋转角度 [roll, pitch, yaw] - 您可以自己调整这些角度
+        # rotation_angles = [-6.1, 1.5, 0.44]  # 初始值，您可以根据需要修改
+        rotation_angles = [-6.05, 1.45, 0.77]
 
         while True:
             # print("=== 从WebSocket获取点云数据 ===")
@@ -749,7 +913,9 @@ async def main():
             current_hatch = header_info.get('current_hatch', 0)
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
-            world_corners = header_info.get('world_corners', {})
+            world_coords = header_info.get('world_coords', {})
+            current_machine_position = header_info.get('current_machine_position', {})
+
             if current_step != 1:
                 # print("当前计算信号不是1，跳过处理")    
                 continue
@@ -761,7 +927,15 @@ async def main():
                 [hatch_corners['corner4']['x'], hatch_corners['corner4']['y'], hatch_corners['corner4']['z']]
             ], dtype=np.float32)
 
-            coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined)
+            world_coords_refined = np.array([
+                [world_coords['corner1']['x'], world_coords['corner1']['y'], world_coords['corner1']['z']],
+                [world_coords['corner2']['x'], world_coords['corner2']['y'], world_coords['corner2']['z']],
+                [world_coords['corner3']['x'], world_coords['corner3']['y'], world_coords['corner3']['z']],
+                [world_coords['corner4']['x'], world_coords['corner4']['y'], world_coords['corner4']['z']]
+            ], dtype=np.float32)
+
+
+            coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
             if len(coal_pile_points) > 0:
                 # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
                  # 构造煤堆数据
@@ -775,14 +949,7 @@ async def main():
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                         "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                         "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
-                    },
-                    "world_corners": {
-                        "corner1": {"x": float(world_corners['corner1']['x']), "y": float(world_corners['corner1']['y']), "z": float(world_corners['corner1']['z'])},
-                        "corner2": {"x": float(world_corners['corner2']['x']), "y": float(world_corners['corner2']['y']), "z": float(world_corners['corner2']['z'])},
-                        "corner3": {"x": float(world_corners['corner3']['x']), "y": float(world_corners['corner3']['y']), "z": float(world_corners['corner3']['z'])},
-                        "corner4": {"x": float(world_corners['corner4']['x']), "y": float(world_corners['corner4']['y']), "z": float(world_corners['corner4']['z'])}
                     }
-
                 }
                 # 添加煤堆点云数据
                 points_list = []
@@ -796,12 +963,328 @@ async def main():
                 coal_pile_data["coal_pile_points"] = points_list
                 
                 # 广播煤堆数据到所有客户端
+                
                 await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                # visualize_pcd_3d(coal_pile_points[:, :3])
                 print(f"煤堆数据已广播到所有连接的客户端")
                 # 发送煤堆数据到WebSocket服务器
             else:
                 # print("未检测到煤堆")
-                logger.warning("未检测到煤堆")
+                logger.info("未检测到煤堆")
+            
+
+
+
+
+
+
+
+
+            line_width=config.GrabPointCalculationConfig.line_width  #线宽
+            floor_height=config.GrabPointCalculationConfig.floor_height  #层高
+            safe_distance_init=config.GrabPointCalculationConfig.safe_distance_init  #初始安全距离
+            plane_ratio=config.GrabPointCalculationConfig.plane_ratio  #平面占比
+            bevel_ratio=config.GrabPointCalculationConfig.bevel_ratio  #斜面占比
+            line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
+            expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
+            expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
+            
+            expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
+            expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
+            block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
+            block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度
+            plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
+            plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
+            bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+
+            #将所有煤堆点转换为真实的坐标系下的点
+            world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
+            #当前煤面的高度,即所有煤堆点的z坐标平均值
+            current_coal_height=world_coal_pile_points[:,2].mean()
+            #当前舱口高度
+            hatch_height=(world_coords_refined[0][2]+world_coords_refined[1][2]+world_coords_refined[2][2]+world_coords_refined[3][2])/4
+            #计算当前煤面的高度与舱口高度的差值
+            height_diff=(current_coal_height-hatch_height).abs()
+            logger.info(f"当前煤面的高度为：{current_coal_height}")
+            logger.info(f"舱口的高度为：{hatch_height}")
+            logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
+            #计算当前煤面在哪一层
+            current_layer = math.ceil(current_coal_height / floor_height)
+            logger.info(f"当前煤面在第{current_layer}层")
+            #计算安全边界
+            if current_layer<=4:
+                safe_distance_x=safe_distance_init-(current_layer-1)*expansion_x_front
+                safe_distance_y=safe_distance_init-(current_layer-1)*expansion_y_front
+            else:
+                safe_distance_x=safe_distance_init-3*expansion_x_front-(current_layer-4)*expansion_x_back
+                safe_distance_y=safe_distance_init-3*expansion_y_front-(current_layer-4)*expansion_y_back
+
+            #计算舱口的长宽
+            hatch_width=(world_coords_refined[0][1]-world_coords_refined[1][1]).abs()
+            hatch_length=(world_coords_refined[1][0]-world_coords_refined[2][0]).abs()
+
+            #确定线的位置
+            #舱口长宽减去安全距离的xy坐标轴范围
+            x_negative =world_coords_refined[2][0]+safe_distance_x
+            x_positive=world_coords_refined[1][0]-safe_distance_x
+            y_ocean=world_coords_refined[0][1]-safe_distance_y
+            y_land=world_coords_refined[1][1]+safe_distance_y
+
+            #第一条线的位置
+            
+            line1_x_negative=current_machine_position-line_width/2
+            line1_x_positive=current_machine_position+line_width/2
+
+            lines= [[line1_x_negative,line1_x_positive]]
+
+            #向x轴负方向生成线
+            negative_edge=line1_x_negative
+            while True:
+              next_negative_edge=negative_edge-(line_width+line_gap)
+              if next_negative_edge>=x_negative:
+                lines.append([next_negative_edge,next_negative_edge+line_width])
+                negative_edge=next_negative_edge
+              else:
+                break
+            
+            #向x轴正方向生成线
+            positive_edge=line1_x_positive
+            while True:
+              next_positive_edge=positive_edge+(line_width+line_gap)
+              if next_positive_edge<=x_positive:
+                lines.append([next_positive_edge-line_width,next_positive_edge])
+                positive_edge=next_positive_edge
+              else:
+                break
+            
+            #给这些线编号，从负方向开始
+            lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
+            # 给每条线编号（从负方向到正方向）
+            lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
+            for num, (x_min, x_max) in lines_dict.items():
+                logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
+
+            #根据大车当前位置，确定大车当前处于哪一条线
+            current_line=1
+            for num, (x_min, x_max) in lines_dict.items():
+                if current_machine_position>=x_min and current_machine_position<=x_max:
+                    current_line=num
+                    break
+            logger.info(f"大车当前处于第{current_line}条线")
+            
+            #定义一个字典，用来保存每条线的高度
+            line_heights_dict={}
+
+            #提取每条线内的煤堆点，不仅有x的限制还有y方向的限制，计算每条线内的点的z坐标的平均值，作为这条线的高度
+            for num, (x_min, x_max) in lines_dict.items():
+                # 提取在当前线框内的点
+                line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= x_min) & (world_coal_pile_points[:, 0] <= x_max)]
+                # 提取在当前线框内且y坐标在安全范围内的点
+                line_points = line_points[(line_points[:, 1] <= y_ocean) & (line_points[:, 1] >= y_land)]
+                #计算这条线的高度
+                line_height=line_points[:,2].mean()
+                logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
+                #保存在一个字典内
+                line_heights_dict[num]=line_height
+
+            #定义一个函数，用来获取下一条线
+            def get_next_line(current_line, direction, line_numbers):
+                line_numbers = sorted(line_numbers)  # 确保从小到大
+                min_line = line_numbers[0]
+                max_line = line_numbers[-1]
+
+                next_line = current_line + direction
+
+                # 到达边界时反向
+                if next_line < min_line or next_line > max_line:
+                    direction *= -1
+                    next_line = current_line + direction
+
+                return next_line, direction
+
+            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于4米的话，就启动换线
+            current_line_height=line_heights_dict[current_line]
+            #是否需要换线
+            need_change_line=False
+            for num, height in line_heights_dict.items():
+                if num!=current_line:
+                    height_diff=abs(current_line_height-height)
+                    if height_diff>4:
+                        logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
+                        #启动换线
+                        need_change_line=True
+                        break
+
+            #如果需要换线
+            # if need_change_line:
+            #   #获取下一条线，线判断下一条线的与其他线的高度差是否大于4米，大于4米就还需要换线
+            #   next_line, persisted_line_change_direction = get_next_line(current_line, persisted_line_change_direction, list(lines_dict.keys()))
+
+            #   logger.info(f"换线到第{next_line}条线")
+            if need_change_line:
+              # 如果需要换线，就循环找下一条合适的线
+              while need_change_line:
+                  next_line, persisted_line_change_direction = get_next_line(
+                      current_line,
+                      persisted_line_change_direction,
+                      list(lines_dict.keys())
+                  )
+                  logger.info(f"换线到第{next_line}条线")
+
+                  # 更新当前线
+                  current_line = next_line
+                  current_line_height = line_heights_dict[current_line]
+
+                  # 再次判断新线是否需要换线
+                  need_change_line = False
+                  for num, height in line_heights_dict.items():
+                      if num != current_line:
+                          height_diff = abs(current_line_height - height)
+                          if height_diff > 4:
+                              logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，继续换线")
+                              need_change_line = True
+                              break
+            else:
+              #如果不需要换线，就继续保持当前线
+              logger.info(f"当前线为第{current_line}条线，不需要换线")
+              #获取当前线的点云
+              current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
+                # 提取在当前线框内且y坐标在安全范围内的点
+              current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
+              #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中，键为y轴方向第几个block_height，值为一个列表，列表内为x轴方向第几个block_width的点云
+              current_line_points_blocks={}
+              current_line_points_blocks_heights={}
+              x_min, x_max = lines_dict[current_line]
+              y_min, y_max = y_land, y_ocean
+              n_y = int(floor((y_max - y_min) / block_length))
+              n_x = int(floor((x_max - x_min) / block_width))
+              #总共分了多少块
+              total_blocks=n_y*n_x
+              logger.info(f"当前线内的总块数为：{total_blocks}")
+              for i in range(n_y):
+                for j in range(n_x):
+                  #计算当前分块的坐标
+                  x_min_block=x_min+j*block_width
+                  x_max_block=x_min+(j+1)*block_width
+                  y_min_block=y_min+i*block_length
+                  y_max_block=y_min+(i+1)*block_length
+                  #提取当前分块的点云
+                  current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
+                  #将当前分块的点云存到字典中
+                  current_line_points_blocks[(i,j)]=current_line_points_block
+                  #计算当前分块的高度
+                  current_line_points_block_height=current_line_points_block[:,2].mean()
+                  #将当前分块的高度存到字典中
+                  current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
+
+          #选取连续的24块，统计这24块的平均高度值。现在block_width和block_length都为1。我需要统计不同的连续24块的平均高度值，最后选出平均高度值最大的那24个块。比如现在选取n_y=0的一块作为24块的第一块，那么下次的24块的第一块就是n_y=1的第一块
+              window_size =(24/(block_length*block_width))/(line_width/block_width)
+              # 遍历所有可能的起点
+              best_start_y = None
+              best_avg_height = -np.inf
+              best_blocks = None
+              best_block_heights=[]
+              for start_y in range(0, n_y - window_size + 1):
+                  heights = []
+                  for i in range(start_y, start_y + window_size):
+                      for j in range(n_x):
+                          h = current_line_points_blocks_heights.get((i, j))
+                          if h is not None and not np.isnan(h):
+                              heights.append(h)
+                  if heights:
+                      avg_height = np.mean(heights)
+                      if avg_height > best_avg_height:
+                        #记录当前24块的高度
+                          best_block_heights=heights
+                          best_avg_height = avg_height
+                          best_start_y = start_y
+                          best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
+                          # 打印当前最佳块
+                          logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
+
+              #打印最佳块
+              logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
+              #计算24块的高度的方差
+              height_var=np.var(best_block_heights)
+              #打印24块的高度的方差
+              logger.info(f"24块的高度的方差: {height_var}")
+              #判断24块的高度的方差是否小于阈值
+              if height_var<plane_threshold:
+                #如果小于阈值，就认为这24块是平面的
+                logger.info("这24块是平面的")
+                #计算这二十四块的xz平面中心点坐标
+
+                center_xs = []
+                center_ys = []
+                for (i, j) in best_blocks:
+                    # X 中心
+                    x_center = x_min + (j + 0.5) * block_width
+                    # Y 中心
+                    y_center = y_min + (i + 0.5) * block_length
+                    center_xs.append(x_center)
+                    center_ys.append(y_center)
+
+                # 计算 XY 平面中心点
+                avg_x = np.mean(center_xs)
+                avg_y = np.mean(center_ys)
+                avg_height=best_avg_height+plane_distance
+                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+              else:
+                #如果大于阈值，就认为这24块不是平面的
+                logger.info("这24块不是平面的")
+                  # 计算 XY 平面中心点
+                center_xs = []
+                center_ys = []
+                for (i, j) in best_blocks:
+                    # X 中心
+                    x_center = x_min + (j + 0.5) * block_width
+                    # Y 中心
+                    y_center = y_min + (i + 0.5) * block_length
+                    center_xs.append(x_center)
+                    center_ys.append(y_center)
+
+                # 计算 XY 平面中心点
+                avg_x = np.mean(center_xs)
+                avg_y = np.mean(center_ys)
+                avg_height=best_avg_height+bevel_distance
+                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+
+
+                  
+
+
+
+
+              
+
+
+
+
+
+              
+
+
+            
+
+
+            
+
+
+
+            
+
+            
+            
+
+
+                
+
+
+
+
+            
+            
+
             
     except KeyboardInterrupt:
         # print("\n程序被用户中断")
