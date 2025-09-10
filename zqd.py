@@ -1183,146 +1183,139 @@ async def main():
                               logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，继续换线")
                               need_change_line = True
                               break
-              capture_point={'x':999,'y':999,'z':999}
-              coal_pile_data["capture_point"] = capture_point
-              await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-              print(f"煤堆数据已广播到所有连接的客户端")
+              # capture_point={'x':999,'y':999,'z':999}
+              # coal_pile_data["capture_point"] = capture_point
+              # await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+              # print(f"煤堆数据已广播到所有连接的客户端")
 
               
-            else:
+            # else:
               #如果不需要换线，就继续保持当前线
-              logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}，不需要换线")
-              #获取当前线的点云
-              current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
-                # 提取在当前线框内且y坐标在安全范围内的点
-              current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
-                #计算当前线在哪一层
-              current_line_layer=math.ceil(abs(current_coal_height-current_line_height) / floor_height)
-              #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中，键为y轴方向第几个block_height，值为一个列表，列表内为x轴方向第几个block_width的点云
-              current_line_points_blocks={}
-              current_line_points_blocks_heights={}
-              x_min, x_max = lines_dict[current_line]
-              y_min, y_max = y_land, y_ocean
-              n_y = int(floor((y_max - y_min) / block_length))
-              n_x = int(floor((x_max - x_min) / block_width))
-              #总共分了多少块
-              total_blocks=n_y*n_x
-              logger.info(f"当前线内的总块数为：{total_blocks}")
-              for i in range(n_y):
-                for j in range(n_x):
-                  #计算当前分块的坐标
-                  x_min_block=x_min+j*block_width
-                  x_max_block=x_min+(j+1)*block_width
-                  y_min_block=y_min+i*block_length
-                  y_max_block=y_min+(i+1)*block_length
-                  #提取当前分块的点云
-                  current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
-                  #将当前分块的点云存到字典中
-                  current_line_points_blocks[(i,j)]=current_line_points_block
-                  #计算当前分块的高度
-                  if len(current_line_points_block) > 0:
-                      current_line_points_block_height=current_line_points_block[:,2].mean()
-                  else:
-                      current_line_points_block_height=np.nan
-                      logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
-                  #将当前分块的高度存到字典中
-                  current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
+            logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
+            #获取当前线的点云
+            current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
+              # 提取在当前线框内且y坐标在安全范围内的点
+            current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
+              #计算当前线在哪一层
+            current_line_layer=math.ceil(abs(hatch_height-current_line_height) / floor_height)
+            #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中，键为y轴方向第几个block_height，值为一个列表，列表内为x轴方向第几个block_width的点云
+            current_line_points_blocks={}
+            current_line_points_blocks_heights={}
+            x_min, x_max = lines_dict[current_line]
+            y_min, y_max = y_land, y_ocean
+            n_y = int(floor((y_max - y_min) / block_length))
+            n_x = int(floor((x_max - x_min) / block_width))
+            #总共分了多少块
+            total_blocks=n_y*n_x
+            logger.info(f"当前线内的总块数为：{total_blocks}")
+            for i in range(n_y):
+              for j in range(n_x):
+                #计算当前分块的坐标
+                x_min_block=x_min+j*block_width
+                x_max_block=x_min+(j+1)*block_width
+                y_min_block=y_min+i*block_length
+                y_max_block=y_min+(i+1)*block_length
+                #提取当前分块的点云
+                current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
+                #将当前分块的点云存到字典中
+                current_line_points_blocks[(i,j)]=current_line_points_block
+                #计算当前分块的高度
+                if len(current_line_points_block) > 0:
+                    current_line_points_block_height=current_line_points_block[:,2].mean()
+                else:
+                    current_line_points_block_height=np.nan
+                    logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
+                #将当前分块的高度存到字典中
+                current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
 
-              #打印存储的分块高度，加上索引
-              for (i,j),height in current_line_points_blocks_heights.items():
-                logger.info(f"分块({i},{j})的高度为：{height}")
-          #选取连续的24块，统计这24块的平均高度值。现在block_width和block_length都为1。我需要统计不同的连续24块的平均高度值，最后选出平均高度值最大的那24个块。比如现在选取n_y=0的一块作为24块的第一块，那么下次的24块的第一块就是n_y=1的第一块
-              # window_size =(24/(block_length*block_width))/(line_width/block_width)
-              window_size=6
-              # 遍历所有可能的起点
-              best_start_y = None
-              best_avg_height = -np.inf
-              best_blocks = None
-              best_block_heights=[]
-              for start_y in range(0, n_y - window_size + 1):
-                  heights = []
-                  for i in range(start_y, start_y + window_size):
-                      for j in range(n_x):
-                          h = current_line_points_blocks_heights.get((i, j))
-                          if h is not None and not np.isnan(h):
-                              heights.append(h)
-                  if heights:
-                      avg_height = np.mean(heights)
-                      if avg_height > best_avg_height:
-                        #记录当前24块的高度
-                          best_block_heights=heights
-                          best_avg_height = avg_height
-                          best_start_y = start_y
-                          best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
-                          # 打印当前最佳块
-                          logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
+            #打印存储的分块高度，加上索引
+            for (i,j),height in current_line_points_blocks_heights.items():
+              logger.info(f"分块({i},{j})的高度为：{height}")
+        #选取连续的24块，统计这24块的平均高度值。现在block_width和block_length都为1。我需要统计不同的连续24块的平均高度值，最后选出平均高度值最大的那24个块。比如现在选取n_y=0的一块作为24块的第一块，那么下次的24块的第一块就是n_y=1的第一块
+            # window_size =(24/(block_length*block_width))/(line_width/block_width)
+            window_size=6
+            # 遍历所有可能的起点
+            best_start_y = None
+            best_avg_height = -np.inf
+            best_blocks = None
+            best_block_heights=[]
+            for start_y in range(0, n_y - window_size + 1):
+                heights = []
+                for i in range(start_y, start_y + window_size):
+                    for j in range(n_x):
+                        h = current_line_points_blocks_heights.get((i, j))
+                        if h is not None and not np.isnan(h):
+                            heights.append(h)
+                if heights:
+                    avg_height = np.mean(heights)
+                    if avg_height > best_avg_height:
+                      #记录当前24块的高度
+                        best_block_heights=heights
+                        best_avg_height = avg_height
+                        best_start_y = start_y
+                        best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
+                        # 打印当前最佳块
+                        logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
 
-              #打印最佳块
-              logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
-              #计算24块的高度的方差
-              height_var=np.var(best_block_heights)
-              #打印24块的高度的方差
-              logger.info(f"24块的高度的方差: {height_var}")
-              #判断24块的高度的方差是否小于阈值
-              if height_var<plane_threshold:
-                #如果小于阈值，就认为这24块是平面的
-                logger.info("这24块是平面的")
-                #计算这二十四块的xz平面中心点坐标
+            #打印最佳块
+            logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
+            #计算24块的高度的方差
+            height_var=np.var(best_block_heights)
+            #打印24块的高度的方差
+            logger.info(f"24块的高度的方差: {height_var}")
+            center_xs = []
+            center_ys = []
+            for (i, j) in best_blocks:
+                # X 中心
+                x_center = x_min + (j + 0.5) * block_width
+                # Y 中心
+                y_center = y_min + (i + 0.5) * block_length
+                center_xs.append(x_center)
+                center_ys.append(y_center)
 
-                center_xs = []
-                center_ys = []
-                for (i, j) in best_blocks:
-                    # X 中心
-                    x_center = x_min + (j + 0.5) * block_width
-                    # Y 中心
-                    y_center = y_min + (i + 0.5) * block_length
-                    center_xs.append(x_center)
-                    center_ys.append(y_center)
+            # 计算 XY 平面中心点
+            avg_x = np.mean(center_xs)
+            avg_y = np.mean(center_ys)
+            #判断24块的高度的方差是否小于阈值
+            if height_var<plane_threshold:
+              #如果小于阈值，就认为这24块是平面的
+              logger.info("这24块是平面的")
+              #计算这二十四块的xz平面中心点坐标
+              avg_height=best_avg_height+plane_distance
+             
+            else:
+              #如果大于阈值，就认为这24块不是平面的
+              logger.info("这24块是斜面的")
+              avg_height=best_avg_height+bevel_distance
 
-                # 计算 XY 平面中心点
-                avg_x = np.mean(center_xs)
-                avg_y = np.mean(center_ys)
-                avg_height=best_avg_height+plane_distance
-                #计算抓取点处于哪一层
-                capture_point_layer=math.ceil(abs(current_coal_height-avg_height) / floor_height)
+            #计算抓取点处于哪一层
+            capture_point_layer=math.ceil(abs(hatch_height-avg_height) / floor_height)
+            
+            # print(f"抓取点的层号:{capture_point_layer}")
+            #计算抓取点所处的那一层的最低点
+            capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
+            logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+                            #将抓取点的坐标发送到服务器
+            capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
+            coal_pile_data["capture_point"] = capture_point
+            coal_pile_data["capture_point_layer"]=capture_point_layer
+            coal_pile_data["current_line_layer"]=current_line_layer
+             #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,capture_point_layer_min_height
+            to_java_data={
+                'type':2,
+                'capture_point': capture_point,
+                'current_line_layer': int(current_line_layer),
+                'capture_point_layer': int(capture_point_layer),
+                'capture_point_layer_min_height': float(capture_point_layer_min_height)
+            }
+            print(f"煤堆数据已广播到所有连接的客户端")
+            #发送给我连接的服务器
+            json_message = json.dumps(to_java_data, ensure_ascii=False)
+            await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+            await ws_manager.send_message(json_message)
+            print(f"发送给java后台的数据:{to_java_data}")
+            
 
-                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
-                                #将抓取点的坐标发送到服务器
-                capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-                coal_pile_data["capture_point"] = capture_point
-                coal_pile_data["capture_point_layer"]=capture_point_layer
-                coal_pile_data["current_line_layer"]=current_line_layer
-                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-                print(f"煤堆数据已广播到所有连接的客户端")
-
-              else:
-                #如果大于阈值，就认为这24块不是平面的
-                logger.info("这24块是斜面的")
-                  # 计算 XY 平面中心点
-                center_xs = []
-                center_ys = []
-                for (i, j) in best_blocks:
-                    # X 中心
-                    x_center = x_min + (j + 0.5) * block_width
-                    # Y 中心
-                    y_center = y_min + (i + 0.5) * block_length
-                    center_xs.append(x_center)
-                    center_ys.append(y_center)
-
-                # 计算 XY 平面中心点
-                avg_x = np.mean(center_xs)
-                avg_y = np.mean(center_ys)
-                avg_height=best_avg_height+bevel_distance
-                capture_point_layer=math.ceil(abs(current_coal_height-avg_height) / floor_height)
-                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
-                #将抓取点的坐标发送到服务器
-                capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-                coal_pile_data["capture_point"] = capture_point
-                coal_pile_data["capture_point_layer"]=capture_point_layer
-                coal_pile_data["current_line_layer"]=current_line_layer
-                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-                print(f"煤堆数据已广播到所有连接的客户端")
-                
             end_time=time.time()
             logger.info(f"计算时间为：{end_time-start_time}")
 
