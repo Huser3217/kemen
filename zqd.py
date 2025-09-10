@@ -609,7 +609,7 @@ async def get_point_cloud_from_websocket_persistent():
                 continue
 
 
-async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, hatch_corners_refined):
+async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, hatch_corners_refined,capture_point):
     """
     通过持久WebSocket连接发送煤堆点云数据到服务器
     
@@ -617,7 +617,8 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
         coal_pile_points (np.array): 煤堆点云数据，形状为 (N, 4) 包含X,Y,Z,Intensity
         header_info (dict): 原始头部信息
         hatch_corners_refined (np.array): 船舱口四个顶点坐标，形状为 (4, 3)
-    
+        capture_point (dict): 抓取点坐标
+
     Returns:
         bool: 发送是否成功
     """
@@ -663,6 +664,11 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
                 "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                 "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                 "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+            },
+            "capture_point": {
+                "x": float(capture_point['x']),
+                "y": float(capture_point['y']),
+                "z": float(capture_point['z'])
             }
         }
         
@@ -979,9 +985,9 @@ async def main():
                 
                 # 广播煤堆数据到所有客户端
                 
-                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                # await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
                 # visualize_pcd_3d(coal_pile_points[:, :3])
-                print(f"煤堆数据已广播到所有连接的客户端")
+                # print(f"煤堆数据已广播到所有连接的客户端")
                 # 发送煤堆数据到WebSocket服务器
             else:
                 # print("未检测到煤堆")
@@ -994,7 +1000,7 @@ async def main():
 
 
 
-
+            start_time=time.time()
             line_width=GrabPointCalculationConfig.line_width  #线宽
             floor_height=GrabPointCalculationConfig.floor_height  #层高
             safe_distance_init=GrabPointCalculationConfig.safe_distance_init  #初始安全距离
@@ -1142,7 +1148,7 @@ async def main():
             for num, height in line_heights_dict.items():
                 if num!=current_line:
                     height_diff=abs(current_line_height-height)
-                    if height_diff>4:
+                    if height_diff>GrabPointCalculationConfig.height_diff:
                         logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                         #启动换线
                         need_change_line=True
@@ -1167,7 +1173,7 @@ async def main():
                   # 更新当前线
                   current_line = next_line
                   current_line_height = line_heights_dict[current_line]
-
+                
                   # 再次判断新线是否需要换线
                   need_change_line = False
                   for num, height in line_heights_dict.items():
@@ -1177,6 +1183,12 @@ async def main():
                               logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，继续换线")
                               need_change_line = True
                               break
+              capture_point={'x':999,'y':999,'z':999}
+              coal_pile_data["capture_point"] = capture_point
+              await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+              print(f"煤堆数据已广播到所有连接的客户端")
+
+              
             else:
               #如果不需要换线，就继续保持当前线
               logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}，不需要换线")
@@ -1184,6 +1196,8 @@ async def main():
               current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
                 # 提取在当前线框内且y坐标在安全范围内的点
               current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
+                #计算当前线在哪一层
+              current_line_layer=math.ceil(abs(current_coal_height-current_line_height) / floor_height)
               #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中，键为y轴方向第几个block_height，值为一个列表，列表内为x轴方向第几个block_width的点云
               current_line_points_blocks={}
               current_line_points_blocks_heights={}
@@ -1269,7 +1283,18 @@ async def main():
                 avg_x = np.mean(center_xs)
                 avg_y = np.mean(center_ys)
                 avg_height=best_avg_height+plane_distance
+                #计算抓取点处于哪一层
+                capture_point_layer=math.ceil(abs(current_coal_height-avg_height) / floor_height)
+
                 logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+                                #将抓取点的坐标发送到服务器
+                capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
+                coal_pile_data["capture_point"] = capture_point
+                coal_pile_data["capture_point_layer"]=capture_point_layer
+                coal_pile_data["current_line_layer"]=current_line_layer
+                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                print(f"煤堆数据已广播到所有连接的客户端")
+
               else:
                 #如果大于阈值，就认为这24块不是平面的
                 logger.info("这24块是斜面的")
@@ -1288,7 +1313,18 @@ async def main():
                 avg_x = np.mean(center_xs)
                 avg_y = np.mean(center_ys)
                 avg_height=best_avg_height+bevel_distance
+                capture_point_layer=math.ceil(abs(current_coal_height-avg_height) / floor_height)
                 logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+                #将抓取点的坐标发送到服务器
+                capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
+                coal_pile_data["capture_point"] = capture_point
+                coal_pile_data["capture_point_layer"]=capture_point_layer
+                coal_pile_data["current_line_layer"]=current_line_layer
+                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                print(f"煤堆数据已广播到所有连接的客户端")
+                
+            end_time=time.time()
+            logger.info(f"计算时间为：{end_time-start_time}")
 
 
                   

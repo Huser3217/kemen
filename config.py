@@ -22,6 +22,7 @@ class GrabPointCalculationConfig:
     expansion_x_back=0.9  #后四层大车方向（x）外扩系数.
     expansion_y_back=0.9  #后四层小车方向（y）外扩系数.
     plane_threshold = 0.02   #平面阈值
+    height_diff=3.5  #高度差
     plane_distance=-0.5  #平面的情况抓取点移动的距离
     bevel_distance=1  #斜面的情况抓取点移动的距离
 
