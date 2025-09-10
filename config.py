@@ -13,7 +13,7 @@ class GrabPointCalculationConfig:
     """
     line_width = 4      # 线宽
     floor_height = 2  # 层高
-    safe_distance_init=6  #安全距离
+    safe_distance_init=5  #安全距离
     line_gap=0 #线和线之间的间隔
 
     expansion_x_front=0.4  #前四层大车方向（x）外扩系数.

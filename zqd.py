@@ -23,9 +23,10 @@ import binascii
 from datetime import datetime
 import warnings
 import math
+from math import floor
 
 
-from config import config
+from config import GrabPointCalculationConfig
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -212,8 +213,8 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     # 1. 计算船舱四个顶点的x坐标平均值
     avg_x_corners = np.mean(hatch_corners_refined[:, 0])
     
-    # 定义X坐标分割阈值：x坐标平均值加7米
-    x_split_threshold = avg_x_corners + 7
+    # 定义X坐标分割阈值：x坐标平均值加5米
+    x_split_threshold = avg_x_corners + 5
     
     # 2. 将原始点云分为两部分
     # 部分一：x坐标大于阈值的点
@@ -281,7 +282,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
    # 对combined_points_for_clustering进行离群点滤波
 
     # HDBSCAN聚类参数
-    hdbscan_eps_coal = 1
+    hdbscan_eps_coal = 1.3
     hdbscan_min_samples_coal = 20
     
     # 执行聚类（只使用XYZ坐标）
@@ -305,7 +306,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 27052
 SERVER_PATH = "/point-cloud-170"
-USER_ID = "coal-pile-detector"
+USER_ID = "coal-pile-detector-170"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
@@ -510,7 +511,7 @@ async def parse_point_cloud_data(data: bytes):
             'corner2': {'x': world_corner2_x, 'y': world_corner2_y, 'z': world_corner2_z},
             'corner3': {'x': world_corner3_x, 'y': world_corner3_y, 'z': world_corner3_z},
             'corner4': {'x': world_corner4_x, 'y': world_corner4_y, 'z': world_corner4_z}
-        },
+        }
         },
       
         'points': points
@@ -652,6 +653,12 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
             "current_hatch": header_info.get('current_hatch', 0),
             "point_count": len(coal_pile_points),
             "hatch_corners": {
+                "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
+                "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
+                "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
+                "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+            },
+            "world_corners": {
                 "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
                 "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                 "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
@@ -913,7 +920,7 @@ async def main():
             current_hatch = header_info.get('current_hatch', 0)
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
-            world_coords = header_info.get('world_coords', {})
+            world_corners = header_info.get('world_corners', {})
             current_machine_position = header_info.get('current_machine_position', {})
 
             if current_step != 1:
@@ -928,37 +935,45 @@ async def main():
             ], dtype=np.float32)
 
             world_coords_refined = np.array([
-                [world_coords['corner1']['x'], world_coords['corner1']['y'], world_coords['corner1']['z']],
-                [world_coords['corner2']['x'], world_coords['corner2']['y'], world_coords['corner2']['z']],
-                [world_coords['corner3']['x'], world_coords['corner3']['y'], world_coords['corner3']['z']],
-                [world_coords['corner4']['x'], world_coords['corner4']['y'], world_coords['corner4']['z']]
+                [world_corners['corner1']['x'], world_corners['corner1']['y'], world_corners['corner1']['z']],
+                [world_corners['corner2']['x'], world_corners['corner2']['y'], world_corners['corner2']['z']],
+                [world_corners['corner3']['x'], world_corners['corner3']['y'], world_corners['corner3']['z']],
+                [world_corners['corner4']['x'], world_corners['corner4']['y'], world_corners['corner4']['z']]
             ], dtype=np.float32)
 
 
             coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
-            if len(coal_pile_points) > 0:
+                        #将所有煤堆点转换为真实的坐标系下的点
+            world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
+            if len(world_coal_pile_points) > 0:
                 # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
                  # 构造煤堆数据
                 coal_pile_data = {
                     "frame_id": header_info.get('frame_id', 0),
                     "current_hatch": header_info.get('current_hatch', 0),
-                    "point_count": len(coal_pile_points),
-                    "detection_success": len(coal_pile_points) > 0,
+                    "point_count": len(world_coal_pile_points),
+                    "detection_success": len(world_coal_pile_points) > 0,
                     "hatch_corners": {
                         "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                         "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                         "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+                    },
+                     "world_corners": {
+                        "corner1": {"x": float(world_corners['corner1']['x']), "y": float(world_corners['corner1']['y']), "z": float(world_corners['corner1']['z'])},
+                        "corner2": {"x": float(world_corners['corner2']['x']), "y": float(world_corners['corner2']['y']), "z": float(world_corners['corner2']['z'])},
+                        "corner3": {"x": float(world_corners['corner3']['x']), "y": float(world_corners['corner3']['y']), "z": float(world_corners['corner3']['z'])},
+                        "corner4": {"x": float(world_corners['corner4']['x']), "y": float(world_corners['corner4']['y']), "z": float(world_corners['corner4']['z'])}
                     }
                 }
                 # 添加煤堆点云数据
                 points_list = []
-                for point in coal_pile_points:
+                for point in world_coal_pile_points:
                     points_list.append({
                         "x": float(point[0]),
                         "y": float(point[1]),
                         "z": float(point[2]),
-                        "intensity": float(point[3]) if len(point) > 3 else 0.0
+                        #"intensity": float(point[3]) if len(point) > 3 else 0.0
                     })
                 coal_pile_data["coal_pile_points"] = points_list
                 
@@ -980,22 +995,22 @@ async def main():
 
 
 
-            line_width=config.GrabPointCalculationConfig.line_width  #线宽
-            floor_height=config.GrabPointCalculationConfig.floor_height  #层高
-            safe_distance_init=config.GrabPointCalculationConfig.safe_distance_init  #初始安全距离
-            plane_ratio=config.GrabPointCalculationConfig.plane_ratio  #平面占比
-            bevel_ratio=config.GrabPointCalculationConfig.bevel_ratio  #斜面占比
-            line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
-            expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
-            expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
+            line_width=GrabPointCalculationConfig.line_width  #线宽
+            floor_height=GrabPointCalculationConfig.floor_height  #层高
+            safe_distance_init=GrabPointCalculationConfig.safe_distance_init  #初始安全距离
+            plane_ratio=GrabPointCalculationConfig.plane_ratio  #平面占比
+            bevel_ratio=GrabPointCalculationConfig.bevel_ratio  #斜面占比
+            line_gap=GrabPointCalculationConfig.line_gap  #线和线之间的间隔
+            expansion_x_front=GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
+            expansion_y_front=GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
             
-            expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
-            expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
-            block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
-            block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度
-            plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
-            plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
-            bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+            expansion_x_back=GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
+            expansion_y_back=GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
+            block_width=GrabPointCalculationConfig.block_width  #每个分块的宽度
+            block_length=GrabPointCalculationConfig.block_length  #每个分块的长度
+            plane_threshold=GrabPointCalculationConfig.plane_threshold  #平面阈值
+            plane_distance=GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
+            bevel_distance=GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
 
             #将所有煤堆点转换为真实的坐标系下的点
             world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
@@ -1003,32 +1018,45 @@ async def main():
             current_coal_height=world_coal_pile_points[:,2].mean()
             #当前舱口高度
             hatch_height=(world_coords_refined[0][2]+world_coords_refined[1][2]+world_coords_refined[2][2]+world_coords_refined[3][2])/4
+
             #计算当前煤面的高度与舱口高度的差值
-            height_diff=(current_coal_height-hatch_height).abs()
+            height_diff=abs(current_coal_height-hatch_height)
             logger.info(f"当前煤面的高度为：{current_coal_height}")
             logger.info(f"舱口的高度为：{hatch_height}")
             logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
             #计算当前煤面在哪一层
-            current_layer = math.ceil(current_coal_height / floor_height)
+            current_layer = math.ceil(height_diff / floor_height)
             logger.info(f"当前煤面在第{current_layer}层")
             #计算安全边界
             if current_layer<=4:
-                safe_distance_x=safe_distance_init-(current_layer-1)*expansion_x_front
-                safe_distance_y=safe_distance_init-(current_layer-1)*expansion_y_front
+                safe_distance_x=safe_distance_init-((current_layer-1)*expansion_x_front)
+                safe_distance_y=safe_distance_init-((current_layer-1)*expansion_y_front)
+                logger.info(f"当前安全距离x为：{safe_distance_x}")
+                logger.info(f"当前安全距离y为：{safe_distance_y}")
             else:
-                safe_distance_x=safe_distance_init-3*expansion_x_front-(current_layer-4)*expansion_x_back
-                safe_distance_y=safe_distance_init-3*expansion_y_front-(current_layer-4)*expansion_y_back
+                safe_distance_x=safe_distance_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
+                safe_distance_y=safe_distance_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
+                logger.info(f"当前安全距离x为：{safe_distance_x}")
+                logger.info(f"当前安全距离y为：{safe_distance_y}")
 
             #计算舱口的长宽
-            hatch_width=(world_coords_refined[0][1]-world_coords_refined[1][1]).abs()
-            hatch_length=(world_coords_refined[1][0]-world_coords_refined[2][0]).abs()
+            hatch_width=abs(world_coords_refined[1][1]-world_coords_refined[0][1])
+            hatch_length=abs(world_coords_refined[2][0]-world_coords_refined[1][0])
+            logger.info(f"舱口的宽度为：{hatch_width}")
+            logger.info(f"舱口的长度为：{hatch_length}")
 
             #确定线的位置
             #舱口长宽减去安全距离的xy坐标轴范围
-            x_negative =world_coords_refined[2][0]+safe_distance_x
-            x_positive=world_coords_refined[1][0]-safe_distance_x
-            y_ocean=world_coords_refined[0][1]-safe_distance_y
-            y_land=world_coords_refined[1][1]+safe_distance_y
+            x_negative =world_coords_refined[1][0]+safe_distance_x
+            
+            x_positive=world_coords_refined[2][0]-safe_distance_x
+            
+            y_ocean=world_coords_refined[1][1]-safe_distance_y
+            y_land=world_coords_refined[0][1]+safe_distance_y
+            logger.info(f"x_positive为：{x_positive}")
+            logger.info(f"x_negative为：{x_negative}")
+            logger.info(f"y_ocean为：{y_ocean}")
+            logger.info(f"y_land为：{y_land}")
 
             #第一条线的位置
             
@@ -1065,12 +1093,17 @@ async def main():
                 logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
 
             #根据大车当前位置，确定大车当前处于哪一条线
-            current_line=1
+            current_line=None
             for num, (x_min, x_max) in lines_dict.items():
                 if current_machine_position>=x_min and current_machine_position<=x_max:
                     current_line=num
                     break
-            logger.info(f"大车当前处于第{current_line}条线")
+            if current_line is None:
+                logger.info("大车当前位置不在任何一条线上")
+                #跳过这次循环
+                continue
+            else:
+                logger.info(f"大车当前处于第{current_line}条线")
             
             #定义一个字典，用来保存每条线的高度
             line_heights_dict={}
@@ -1129,7 +1162,7 @@ async def main():
                       persisted_line_change_direction,
                       list(lines_dict.keys())
                   )
-                  logger.info(f"换线到第{next_line}条线")
+                  logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
 
                   # 更新当前线
                   current_line = next_line
@@ -1146,7 +1179,7 @@ async def main():
                               break
             else:
               #如果不需要换线，就继续保持当前线
-              logger.info(f"当前线为第{current_line}条线，不需要换线")
+              logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}，不需要换线")
               #获取当前线的点云
               current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
                 # 提取在当前线框内且y坐标在安全范围内的点
@@ -1173,12 +1206,20 @@ async def main():
                   #将当前分块的点云存到字典中
                   current_line_points_blocks[(i,j)]=current_line_points_block
                   #计算当前分块的高度
-                  current_line_points_block_height=current_line_points_block[:,2].mean()
+                  if len(current_line_points_block) > 0:
+                      current_line_points_block_height=current_line_points_block[:,2].mean()
+                  else:
+                      current_line_points_block_height=np.nan
+                      logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
                   #将当前分块的高度存到字典中
                   current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
 
+              #打印存储的分块高度，加上索引
+              for (i,j),height in current_line_points_blocks_heights.items():
+                logger.info(f"分块({i},{j})的高度为：{height}")
           #选取连续的24块，统计这24块的平均高度值。现在block_width和block_length都为1。我需要统计不同的连续24块的平均高度值，最后选出平均高度值最大的那24个块。比如现在选取n_y=0的一块作为24块的第一块，那么下次的24块的第一块就是n_y=1的第一块
-              window_size =(24/(block_length*block_width))/(line_width/block_width)
+              # window_size =(24/(block_length*block_width))/(line_width/block_width)
+              window_size=6
               # 遍历所有可能的起点
               best_start_y = None
               best_avg_height = -np.inf
@@ -1231,7 +1272,7 @@ async def main():
                 logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
               else:
                 #如果大于阈值，就认为这24块不是平面的
-                logger.info("这24块不是平面的")
+                logger.info("这24块是斜面的")
                   # 计算 XY 平面中心点
                 center_xs = []
                 center_ys = []
