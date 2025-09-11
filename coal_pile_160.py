@@ -281,7 +281,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
 
 
     # HDBSCAN聚类参数
-    hdbscan_eps_coal = 1
+    hdbscan_eps_coal = 1.3
     hdbscan_min_samples_coal = 20
     
     # 执行聚类（只使用XYZ坐标）
@@ -780,6 +780,98 @@ class CoalPileBroadcastServer:
         logger.info(f"广播服务器已启动，等待客户端连接...")
         return self.server
 
+
+
+def lidar_to_world_with_x(points_lidar, translation, actual_x, rotation_angles=[0, 0, 0], degrees=True):
+    """
+    将激光雷达坐标系下的点转换到实际坐标系，并加入实际x值
+
+    参数:
+        points_lidar: Nx3 numpy数组，激光雷达坐标系下的点云 (x, y, z)
+        translation: 3元素列表/数组，激光雷达中心在实际坐标系中的位置 [tx, ty, tz]
+        actual_x: 实际x值，将加入到平移矩阵中
+        rotation_angles: 3元素列表/数组，安装角度 [roll, pitch, yaw]（默认单位：度）
+        degrees: 是否为角度制（True），False则为弧度制
+
+    返回:
+        Nx3 numpy数组，实际坐标系下的点云
+    """
+
+    points_lidar = np.asarray(points_lidar)
+    if points_lidar.ndim == 1:  # 兼容单个点
+        points_lidar = points_lidar[np.newaxis, :]
+
+    # 1) 轴向置换矩阵：把 L 系 (x,y,z) 映射到与 W 系轴向一致
+    #    [Lz,  Ly, -Lx]  -> [Wx, Wy, Wz]
+    P = np.array([[0, 0, 1],   # Wx =  Lz
+                  [0, 1, 0],   # Wy =  Ly
+                  [-1, 0, 0]]) # Wz = -Lx
+
+    # 2) 安装角：支持三个轴的旋转 (roll, pitch, yaw)
+    # 用户可以自己调整这三个角度
+    R_install = R.from_euler('xyz', rotation_angles, degrees=degrees).as_matrix()
+
+    # 3) 组合旋转：先轴向置换，再安装角
+    R_total = R_install @ P
+
+    # 4) 平移向量，加入实际x值
+    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
+
+    # 5) 转换
+    points_world = (R_total @ points_lidar.T) + T
+    return points_world.T
+
+
+
+def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[0, 0, 0], degrees=True):
+    """
+    将实际坐标系下的点转换到激光雷达坐标系，并减去实际x值
+
+    参数:
+        points_world: Nx3 numpy数组，实际坐标系下的点云 (x, y, z)
+        translation: 3元素列表/数组，激光雷达中心在实际坐标系中的位置 [tx, ty, tz]
+        actual_x: 实际x值，将从平移矩阵中减去
+        rotation_angles: 3元素列表/数组，安装角度 [roll, pitch, yaw]（默认单位：度）
+        degrees: 是否为角度制（True），False则为弧度制
+
+    返回:
+        Nx3 numpy数组，激光雷达坐标系下的点云
+    """
+    
+    points_world = np.asarray(points_world)
+    if points_world.ndim == 1:  # 兼容单个点
+        points_world = points_world[np.newaxis, :]
+    
+    # 1) 轴向置换矩阵：把 L 系 (x,y,z) 映射到与 W 系轴向一致
+    #    [Lz,  Ly, -Lx]  -> [Wx, Wy, Wz]
+    P = np.array([[0, 0, 1],   # Wx =  Lz
+                  [0, 1, 0],   # Wy =  Ly
+                  [-1, 0, 0]]) # Wz = -Lx
+    
+    # 2) 安装角：支持三个轴的旋转 (roll, pitch, yaw)
+    R_install = R.from_euler('xyz', rotation_angles, degrees=degrees).as_matrix()
+    
+    # 3) 组合旋转：先轴向置换，再安装角
+    R_total = R_install @ P
+    
+    # 4) 平移向量 
+    T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
+    
+    # 5) 逆向转换：先减去平移，再应用逆旋转
+    # 逆旋转矩阵是原旋转矩阵的转置
+    R_total_inv = R_total.T
+    
+    # 减去平移向量
+    points_translated = points_world.T - T
+    
+    # 应用逆旋转
+    points_lidar = R_total_inv @ points_translated
+    
+    return points_lidar.T
+
+
+
+
 # 全局广播服务器实例
 broadcast_server = None
 
@@ -806,7 +898,13 @@ async def main():
         return
     
     try:
-        visualize_clustered_pcd = True  # 可视化聚类后的结果
+        visualize_clustered_pcd = False  # 可视化聚类后的结果
+                # 安装参数
+        translation = [3.725, 24.324, 31.4]
+            
+            # 旋转角度 [roll, pitch, yaw] - 您可以自己调整这些角度
+        # rotation_angles = [-6.1, 1.5, 0.44]  # 初始值，您可以根据需要修改
+        rotation_angles = [-6.05, 1.45, 0.77]
         while True:
             # print("=== 从WebSocket获取点云数据 ===")
             original_points, header_info = await get_point_cloud_from_websocket_persistent()
@@ -819,6 +917,7 @@ async def main():
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
             world_corners = header_info.get('world_corners', {})
+            current_machine_position = header_info.get('current_machine_position', {})
             if current_step != 1:
                 # print("当前计算信号不是1，跳过处理")    
                 continue
@@ -831,14 +930,16 @@ async def main():
             ], dtype=np.float32)
 
             coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
-            if len(coal_pile_points) > 0:
+            world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
+
+            if len(world_coal_pile_points) > 0:
                 # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
                  # 构造煤堆数据
                 coal_pile_data = {
                     "frame_id": header_info.get('frame_id', 0),
                     "current_hatch": header_info.get('current_hatch', 0),
-                    "point_count": len(coal_pile_points),
-                    "detection_success": len(coal_pile_points) > 0,
+                    "point_count": len(world_coal_pile_points),
+                    "detection_success": len(world_coal_pile_points) > 0,
                     "hatch_corners": {
                         "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
@@ -854,7 +955,7 @@ async def main():
                 }
                 # 添加煤堆点云数据
                 points_list = []
-                for point in coal_pile_points:
+                for point in world_coal_pile_points:
                     points_list.append({
                         "x": float(point[0]),
                         "y": float(point[1]),

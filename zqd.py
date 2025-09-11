@@ -859,8 +859,8 @@ def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[
     # 3) 组合旋转：先轴向置换，再安装角
     R_total = R_install @ P
     
-    # 4) 平移向量，加入实际x值
-    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
+    # 4) 平移向量
+    T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
     
     # 5) 逆向转换：先减去平移，再应用逆旋转
     # 逆旋转矩阵是原旋转矩阵的转置
@@ -1300,6 +1300,7 @@ async def main():
             coal_pile_data["capture_point"] = capture_point
             coal_pile_data["capture_point_layer"]=capture_point_layer
             coal_pile_data["current_line_layer"]=current_line_layer
+            coal_pile_data["capture_point_layer_min_height"]=float(capture_point_layer_min_height)
              #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,capture_point_layer_min_height
             to_java_data={
                 'type':2,

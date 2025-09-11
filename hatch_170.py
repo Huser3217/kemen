@@ -534,7 +534,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
     # print("步骤 2: 正在执行形态学闭运算以连接边缘...")
     
     # 形态学核的大小，这个值决定了能填充多大的空洞和连接多远的间隙
-    kernel_size = 10
+    kernel_size = 20
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
     
     # 执行闭运算（膨胀 + 腐蚀）
@@ -1327,7 +1327,7 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
     edge_x_averages = []
     
     # 搜索参数定义
-    inward_search_distance = 0.2   # 向矩形内部的搜索距离（米）
+    inward_search_distance = 0.5   # 向矩形内部的搜索距离（米）
     outward_search_distance = 1.5  # 向矩形外部的搜索距离（米）
     x_sample_range = 5             # X坐标采样范围（米）
     edge_sample_geometries = []
@@ -1475,7 +1475,7 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
     # 在短边的端点附近创建精细搜索区域，用于高精度X坐标计算
     
     # 搜索区域参数
-    shorten_dist = 4          # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
+    shorten_dist = 5        # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
     z_expand_min = -0.4       # Z方向向内扩展距离（米）
     z_expand_max = 0.8        # Z方向向外扩展距离（米）
     search_rect_width = 1   # 搜索矩形宽度（米）
@@ -2159,7 +2159,7 @@ async def send_hatch_coordinates_to_websocket_persistent(hatch_corners, current_
         
         # 构造要发送的数据
         data_to_send = {
-            "type": "hatch_detection_result",
+            "type": 1,
             "timestamp": int(time.time() * 1000),  # 毫秒时间戳
             "current_hatch": current_hatch,
             "lidar_coordinates": {
@@ -2311,8 +2311,8 @@ def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[
     # 3) 组合旋转：先轴向置换，再安装角
     R_total = R_install @ P
     
-    # 4) 平移向量，加入实际x值
-    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
+    # 4) 平移向量
+    T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
     
     # 5) 逆向转换：先减去平移，再应用逆旋转
     # 逆旋转矩阵是原旋转矩阵的转置
@@ -2343,9 +2343,9 @@ async def main():
         VIS_ORIGINAL_3D = False  # 可视化原始点云
         VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
         VISUALIZE_HDBSCAN = False      # 可视化HDBSCAN聚类结果
-        VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
-        VISUALIZE_FINAL_RESULT =False  # 可视化最终结果
-        IS_FIRST_TIME = False
+        VISUALIZE_RECTANGLE = True  # 可视化矩形检测过程
+        VISUALIZE_FINAL_RESULT =True  # 可视化最终结果
+        
 
         # 安装参数
         translation = [3.725, 24.324, 31.4]
@@ -2355,6 +2355,7 @@ async def main():
         rotation_angles = [-6.05, 1.45, 0.77]
            
         while True:
+            IS_FIRST_TIME = False
             # print("=== 从WebSocket获取点云数据 ===")
             # start_time = time.time()
             original_points, header_info = await get_point_cloud_from_websocket_persistent()
@@ -2422,9 +2423,9 @@ async def main():
                 original_points,
                 x_initial_threshold=10.0, 
                 x_stat_percentage=0.5,
-                x_filter_offset=2.0,
+                x_filter_offset=2.5,
                 intensity_threshold=10.0, #强度
-                x_upper_bound_adjustment=1.5,
+                x_upper_bound_adjustment=1.8,
                 visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
             
             #调用聚类函数
