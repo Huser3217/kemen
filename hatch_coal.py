@@ -1486,39 +1486,42 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
             # print(f"区域 {i}: 只找到 {len(points_in_region)} 个点，使用平均X坐标: {avg_x:.3f}")
         else:
             # 未找到点时先标记为None，稍后处理
-            region_x_values.append(None)
+            region_x_values.append(999)
             # print(f"区域 {i}: 未找到点，稍后处理")
     
-    # ==================== 步骤7.5: 处理未找到点的区域 ====================
-    # 在所有区域搜寻完成后，单独处理没有找到点的区域
-    for i, x_value in enumerate(region_x_values):
-        if x_value is None:
-            current_region = search_regions[i]
-            edge_idx = current_region['edge_idx']
-            end_idx = current_region['end_idx']
+    # # ==================== 步骤7.5: 处理未找到点的区域 ====================
+    # # 在所有区域搜寻完成后，单独处理没有找到点的区域
+    # for i, x_value in enumerate(region_x_values):
+    #     if x_value is None:
+    #         current_region = search_regions[i]
+    #         edge_idx = current_region['edge_idx']
+    #         end_idx = current_region['end_idx']
             
-            # 寻找同一条边上的另一个搜索区域
-            same_edge_x = None
-            for j, other_region in enumerate(search_regions):
-                if j != i and other_region['edge_idx'] == edge_idx and other_region['end_idx'] != end_idx:
-                    # 找到同一条边上的另一个区域，检查是否有有效的X坐标
-                    if region_x_values[j] is not None:
-                        same_edge_x = region_x_values[j]
-                        break
+    #         # 寻找同一条边上的另一个搜索区域
+    #         same_edge_x = None
+    #         for j, other_region in enumerate(search_regions):
+    #             if j != i and other_region['edge_idx'] == edge_idx and other_region['end_idx'] != end_idx:
+    #                 # 找到同一条边上的另一个区域，检查是否有有效的X坐标
+    #                 if region_x_values[j] is not None:
+    #                     same_edge_x = region_x_values[j]
+    #                     break
             
-            if same_edge_x is not None:
-                region_x_values[i] = same_edge_x
-                # print(f"区域 {i}: 使用同一条边上另一个顶点的X坐标: {same_edge_x:.3f}")
+    #         if same_edge_x is not None:
+    #             region_x_values[i] = 999
+    #             # print(f"区域 {i}: 使用同一条边上另一个顶点的X坐标: {same_edge_x:.3f}")
                
-            else:
-                # 如果同一条边上的另一个顶点也没有找到点，则使用全局基准值作为后备
-                region_x_values[i] = avg_x_baseline
-                # print(f"区域 {i}: 同边顶点也无有效坐标，使用全局平均X坐标: {avg_x_baseline:.3f}")
+    #         else:
+    #             # 如果同一条边上的另一个顶点也没有找到点，则使用全局基准值作为后备
+    #             region_x_values[i] = 999
+    #             # print(f"区域 {i}: 同边顶点也无有效坐标，使用全局平均X坐标: {avg_x_baseline:.3f}")
 
+
+     
+    refined_corners_3d = np.zeros((4, 3))
+ 
     # ==================== 步骤8: X坐标分配给矩形顶点 ====================
     # 将计算出的X坐标分配给对应的矩形角点，完成3D重建
-    refined_corners_3d = np.zeros((4, 3))
-
+  
     for vertex_idx in range(4):
         vertex_yz = refined_corners_yz[vertex_idx]
 
@@ -1539,7 +1542,21 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
             avg_x = avg_x_baseline
             refined_corners_3d[vertex_idx] = [avg_x, vertex_yz[0], vertex_yz[1]]
             # print(f"顶点 {vertex_idx}: 使用后备X坐标: {avg_x:.3f}")
-
+#处理点的高度差值大于1.5的情况，如果z轴方向同一条边上的两个顶点高度差大于1.5米的话，就修改高度大的点的高度为小的点的高度
+    for i in [0, 2]:
+        if np.abs(refined_corners_3d[i,0]-refined_corners_3d[(i+1)%4,0])>1.5:
+            diff=np.abs(refined_corners_3d[(i+2)%4,0]-refined_corners_3d[(i+3)%4,0])
+            if refined_corners_3d[i,0]>refined_corners_3d[(i+1)%4,0]:
+              if refined_corners_3d[(i+3)%4,0]>refined_corners_3d[(i+2)%4,0]:
+                refined_corners_3d[i,0]=refined_corners_3d[(i+1)%4,0]+diff
+              
+              else:
+                refined_corners_3d[i,0]=refined_corners_3d[(i+1)%4,0]-diff
+            else:
+              if refined_corners_3d[(i+3)%4,0]>refined_corners_3d[(i+2)%4,0]:
+                refined_corners_3d[(i+1)%4,0]=refined_corners_3d[i,0]-diff
+              else:
+                refined_corners_3d[(i+1)%4,0]=refined_corners_3d[i,0]+diff
     # print("--- 高精度X坐标精确化完成（增强KD-tree版本）---")
    
     return refined_corners_3d, search_geometries,edge_sample_geometries
