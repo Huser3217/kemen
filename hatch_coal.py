@@ -2329,6 +2329,8 @@ async def main():
     # -1: 沿X轴负方向换线 (编号减少的方向)
     persisted_line_change_direction = -1 
 
+
+
     try:
 
         VIS_ORIGINAL_3D = False  # 可视化原始点云
@@ -2537,8 +2539,7 @@ async def main():
             line_width=config.GrabPointCalculationConfig.line_width  #线宽
             floor_height=config.GrabPointCalculationConfig.floor_height  #层高
             safe_distance_init=config.GrabPointCalculationConfig.safe_distance_init  #初始安全距离
-            plane_ratio=config.GrabPointCalculationConfig.plane_ratio  #平面占比
-            bevel_ratio=config.GrabPointCalculationConfig.bevel_ratio  #斜面占比
+            hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
             line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
             expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
             expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
@@ -2550,7 +2551,10 @@ async def main():
             plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
             plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
             bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+            retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
 
+            #最大高度差
+            max_height_diff=hatch_depth-retain_height
             #将所有煤堆点转换为真实的坐标系下的点
             world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
             #当前煤面的高度,即所有煤堆点的z坐标平均值
@@ -2696,7 +2700,7 @@ async def main():
             for num, height in line_heights_dict.items():
                 if num!=current_line:
                     height_diff=abs(current_line_height-height)
-                    if height_diff>GrabPointCalculationConfig.height_diff and current_line_height<height:
+                    if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
                         logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                         #启动换线
                         need_change_line=True
@@ -2727,13 +2731,15 @@ async def main():
                   for num, height in line_heights_dict.items():
                       if num != current_line:
                           height_diff = abs(current_line_height - height)
-                          if height_diff > config.GrabPointCalculationConfig.height_diff and current_line_height<height:
-                              logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config.GrabPointCalculationConfig.height_diff}米，继续换线")
+                          if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
                               need_change_line = True
                               break
 
 
             logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
+
+            
+            
             #获取当前线的点云
             current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
               # 提取在当前线框内且y坐标在安全范围内的点
