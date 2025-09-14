@@ -28,7 +28,10 @@ from datetime import datetime
 import warnings
 import math
 from math import floor
-
+import threading
+import importlib
+import sys
+from pathlib import Path
 
 from config import GrabPointCalculationConfig
 warnings.filterwarnings(
@@ -1324,7 +1327,7 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
     # 在短边的端点附近创建精细搜索区域，用于高精度X坐标计算
     
     # 搜索区域参数
-    shorten_dist = 5        # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
+    shorten_dist = 2        # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
     z_expand_min = -0.4       # Z方向向内扩展距离（米）
     z_expand_max = 0.8        # Z方向向外扩展距离（米）
     search_rect_width = 1   # 搜索矩形宽度（米）
@@ -2332,8 +2335,8 @@ async def main():
 
         VIS_ORIGINAL_3D = False  # 可视化原始点云
         VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
-        VISUALIZE_RECTANGLE = True  # 可视化矩形检测过程
-        VISUALIZE_FINAL_RESULT =True  # 可视化最终结果
+        VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
+        VISUALIZE_FINAL_RESULT =False  # 可视化最终结果
         visualize_clustered_pcd = False  # 可视化聚类后的结果
        
         # 安装参数
@@ -2341,7 +2344,7 @@ async def main():
             
             # 旋转角度 [roll, pitch, yaw] - 您可以自己调整这些角度
         # rotation_angles = [-6.1, 1.5, 0.44]  # 初始值，您可以根据需要修改
-        rotation_angles = [-6.05, 0.45, 0]
+        rotation_angles = [-6.05, 2.45, 0]
 
         while True:
 
@@ -2398,14 +2401,18 @@ async def main():
                 hatch_point = np.array([
                     [hatch_center_x,hatch_center_y,hatch_center_z]
                 ])
-                world_center_x,world_center_y,world_center_z = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
+                
+                world_center_result = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)
+                world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
+                # world_center_x,world_center_y,world_center_z = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
                 world_center_x = world_center_x+(last_machine_position-current_machine_position)
                 world_point = np.array([
                     [world_center_x,world_center_y,world_center_z]
                 ])
                 #------------------------------------------------------------------------------------------------------
                 
-                radar_center_x, radar_center_y, radar_center_z = world_to_lidar_with_x(world_point,translation,rotation_angles)[0]
+                radar_center_result = world_to_lidar_with_x(world_point,translation,rotation_angles)
+                radar_center_x, radar_center_y, radar_center_z = radar_center_result[0][0], radar_center_result[0][1], radar_center_result[0][2]
                  
 
             if VIS_ORIGINAL_3D:
@@ -2558,11 +2565,24 @@ async def main():
             if current_layer<=4:
                 safe_distance_x=safe_distance_init-((current_layer-1)*expansion_x_front)
                 safe_distance_y=safe_distance_init-((current_layer-1)*expansion_y_front)
+                if safe_distance_x<=0:
+                    safe_distance_x=0
+
+                if safe_distance_y<=0:
+                    safe_distance_y=0
+                
+
                 logger.info(f"当前安全距离x为：{safe_distance_x}")
                 logger.info(f"当前安全距离y为：{safe_distance_y}")
             else:
                 safe_distance_x=safe_distance_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
                 safe_distance_y=safe_distance_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
+
+                if safe_distance_x<=0:
+                    safe_distance_x=0
+
+                if safe_distance_y<=0:
+                    safe_distance_y=0
                 logger.info(f"当前安全距离x为：{safe_distance_x}")
                 logger.info(f"当前安全距离y为：{safe_distance_y}")
 
@@ -2578,8 +2598,9 @@ async def main():
             
             x_positive=points_world[2][0]-safe_distance_x
             
-            y_ocean=points_world[1][1]-safe_distance_y
-            y_land=points_world[0][1]+safe_distance_y
+            #todo
+            y_ocean=points_world[1][1]-safe_distance_y+2.9#
+            y_land=points_world[0][1]+safe_distance_y-2.9
             logger.info(f"x_positive为：{x_positive}")
             logger.info(f"x_negative为：{x_negative}")
             logger.info(f"y_ocean为：{y_ocean}")
