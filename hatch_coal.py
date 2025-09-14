@@ -28,12 +28,10 @@ from datetime import datetime
 import warnings
 import math
 from math import floor
-import threading
 import importlib
-import sys
-from pathlib import Path
 
-from config import GrabPointCalculationConfig
+# from config import GrabPointCalculationConfig
+import config
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -2347,7 +2345,7 @@ async def main():
         rotation_angles = [-6.05, 2.45, 0]
 
         while True:
-
+            importlib.reload(config)
             IS_FIRST_TIME = False
             # print("=== 从WebSocket获取点云数据 ===")            
             original_points, header_info = await get_point_cloud_from_websocket_persistent()
@@ -2417,6 +2415,8 @@ async def main():
 
             if VIS_ORIGINAL_3D:
                 visualize_pcd_3d(original_points[:, :3], title="原始点云数据")
+
+            start_time_hatch = time.time()
             # 调用粗过滤函数
             coarse_filtered_points = coarse_filtration_point_cloud(
                 original_points,
@@ -2468,14 +2468,16 @@ async def main():
             if VISUALIZE_FINAL_RESULT:
                 visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
 
+            end_time_hatch = time.time()
+            hatch_time = end_time_hatch - start_time_hatch
+            logger.info(f"舱口识别时间为：{hatch_time}")
 
 
 
 
 
 
-
-
+            start_time_coal = time.time()
             coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
                         #将所有煤堆点转换为真实的坐标系下的点
             world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
@@ -2521,6 +2523,9 @@ async def main():
                 # print("未检测到煤堆")
                 logger.info("未检测到煤堆")
             
+            end_time_coal = time.time()
+            coal_time = end_time_coal - start_time_coal
+            logger.info(f"煤堆分割时间为：{coal_time}")
 
 
 
@@ -2528,23 +2533,23 @@ async def main():
 
 
 
-            start_time=time.time()
-            line_width=GrabPointCalculationConfig.line_width  #线宽
-            floor_height=GrabPointCalculationConfig.floor_height  #层高
-            safe_distance_init=GrabPointCalculationConfig.safe_distance_init  #初始安全距离
-            plane_ratio=GrabPointCalculationConfig.plane_ratio  #平面占比
-            bevel_ratio=GrabPointCalculationConfig.bevel_ratio  #斜面占比
-            line_gap=GrabPointCalculationConfig.line_gap  #线和线之间的间隔
-            expansion_x_front=GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
-            expansion_y_front=GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
+            start_time_grab=time.time()
+            line_width=config.GrabPointCalculationConfig.line_width  #线宽
+            floor_height=config.GrabPointCalculationConfig.floor_height  #层高
+            safe_distance_init=config.GrabPointCalculationConfig.safe_distance_init  #初始安全距离
+            plane_ratio=config.GrabPointCalculationConfig.plane_ratio  #平面占比
+            bevel_ratio=config.GrabPointCalculationConfig.bevel_ratio  #斜面占比
+            line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
+            expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
+            expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
             
-            expansion_x_back=GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
-            expansion_y_back=GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
-            block_width=GrabPointCalculationConfig.block_width  #每个分块的宽度
-            block_length=GrabPointCalculationConfig.block_length  #每个分块的长度
-            plane_threshold=GrabPointCalculationConfig.plane_threshold  #平面阈值
-            plane_distance=GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
-            bevel_distance=GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+            expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
+            expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
+            block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
+            block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度    
+            plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
+            plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
+            bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
 
             #将所有煤堆点转换为真实的坐标系下的点
             world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
@@ -2594,13 +2599,14 @@ async def main():
 
             #确定线的位置
             #舱口长宽减去安全距离的xy坐标轴范围
-            x_negative =points_world[1][0]+safe_distance_x
+
             
-            x_positive=points_world[2][0]-safe_distance_x
+            x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x
+            x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x
             
             #todo
-            y_ocean=points_world[1][1]-safe_distance_y+2.9#
-            y_land=points_world[0][1]+safe_distance_y-2.9
+            y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y+2.9#Ocean
+            y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y-2.9#Land
             logger.info(f"x_positive为：{x_positive}")
             logger.info(f"x_negative为：{x_negative}")
             logger.info(f"y_ocean为：{y_ocean}")
@@ -2721,18 +2727,12 @@ async def main():
                   for num, height in line_heights_dict.items():
                       if num != current_line:
                           height_diff = abs(current_line_height - height)
-                          if height_diff > GrabPointCalculationConfig.height_diff and current_line_height<height:
-                              logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，继续换线")
+                          if height_diff > config.GrabPointCalculationConfig.height_diff and current_line_height<height:
+                              logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config.GrabPointCalculationConfig.height_diff}米，继续换线")
                               need_change_line = True
                               break
-              # capture_point={'x':999,'y':999,'z':999}
-              # coal_pile_data["capture_point"] = capture_point
-              # await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-              # print(f"煤堆数据已广播到所有连接的客户端")
 
-              
-            # else:
-              #如果不需要换线，就继续保持当前线
+
             logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
             #获取当前线的点云
             current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
@@ -2740,7 +2740,7 @@ async def main():
             current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
               #计算当前线在哪一层
             current_line_layer=math.ceil(abs(hatch_height-current_line_height) / floor_height)
-            #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中，键为y轴方向第几个block_height，值为一个列表，列表内为x轴方向第几个block_width的点云
+            #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中
             current_line_points_blocks={}
             current_line_points_blocks_heights={}
             x_min, x_max = lines_dict[current_line]
@@ -2773,9 +2773,9 @@ async def main():
             #打印存储的分块高度，加上索引
             for (i,j),height in current_line_points_blocks_heights.items():
               logger.info(f"分块({i},{j})的高度为：{height}")
-        #选取连续的24块，统计这24块的平均高度值。现在block_width和block_length都为1。我需要统计不同的连续24块的平均高度值，最后选出平均高度值最大的那24个块。比如现在选取n_y=0的一块作为24块的第一块，那么下次的24块的第一块就是n_y=1的第一块
-            # window_size =(24/(block_length*block_width))/(line_width/block_width)
-            window_size=6
+            # 选取连续的面积为24的块，统计这些块的平均高度值。
+            window_size =(24/(block_length*block_width))/(line_width/block_width)
+            # window_size=6
             # 遍历所有可能的起点
             best_start_y = None
             best_avg_height = -np.inf
@@ -2801,10 +2801,10 @@ async def main():
 
             #打印最佳块
             logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
-            #计算24块的高度的方差
+            #计算这些块的高度的方差
             height_var=np.var(best_block_heights)
-            #打印24块的高度的方差
-            logger.info(f"24块的高度的方差: {height_var}")
+            #打印这些块的高度的方差
+            logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
             center_xs = []
             center_ys = []
             for (i, j) in best_blocks:
@@ -2818,16 +2818,16 @@ async def main():
             # 计算 XY 平面中心点
             avg_x = np.mean(center_xs)
             avg_y = np.mean(center_ys)
-            #判断24块的高度的方差是否小于阈值
+            #判断这些块的高度的方差是否小于阈值
             if height_var<plane_threshold:
-              #如果小于阈值，就认为这24块是平面的
-              logger.info("这24块是平面的")
-              #计算这二十四块的xz平面中心点坐标
+              #如果小于阈值，就认为这些块是平面的
+              logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
+
               avg_height=best_avg_height+plane_distance
              
             else:
-              #如果大于阈值，就认为这24块不是平面的
-              logger.info("这24块是斜面的")
+              #如果大于阈值，就认为这些块不是平面的
+              logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
               avg_height=best_avg_height+bevel_distance
 
             #计算抓取点处于哪一层
@@ -2835,15 +2835,20 @@ async def main():
             
             # print(f"抓取点的层号:{capture_point_layer}")
             #计算抓取点所处的那一层的最低点
-            capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
+            # capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
+
+            #计算本线所处的那一层的最低点
+            current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
+
             logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
                             #将抓取点的坐标发送到服务器
             capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
             coal_pile_data["capture_point"] = capture_point
             coal_pile_data["capture_point_layer"]=capture_point_layer
             coal_pile_data["current_line_layer"]=current_line_layer
-            coal_pile_data["capture_point_layer_min_height"]=float(capture_point_layer_min_height)
-             #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,capture_point_layer_min_height
+            coal_pile_data["min_height"]=float(current_line_layer_min_height)
+
+             #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
             to_java_data={
                 'type':2,
                 'timestamp': int(time.time() * 1000),  # 毫秒时间戳
@@ -2853,20 +2858,20 @@ async def main():
                 'capture_point': capture_point,
                 'current_line_layer': int(current_line_layer),
                 'capture_point_layer': int(capture_point_layer),
-                'capture_point_layer_min_height': float(capture_point_layer_min_height),
+                'min_height': float(current_line_layer_min_height),
                 'current_hatch': int(current_hatch),
                 'current_unLoadShip':3
             }
             print(f"煤堆数据已广播到所有连接的客户端")
             #发送给我连接的服务器
             json_message = json.dumps(to_java_data, ensure_ascii=False)
-            await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
             await ws_manager.send_message(json_message)
+            await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
             print(f"发送给java后台的数据:{to_java_data}")
             
 
-            end_time=time.time()
-            logger.info(f"计算时间为：{end_time-start_time}")
+            end_time_grab=time.time()
+            logger.info(f"计算时间为：{end_time_grab-start_time_grab}")
 
 
                   
