@@ -1842,8 +1842,8 @@ USER_ID = "hatch-detector-170"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
-# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
+# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -1952,6 +1952,7 @@ async def parse_point_cloud_data(data: bytes):
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
                 magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
+                last_machine_position,
                 current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
@@ -1984,6 +1985,7 @@ async def parse_point_cloud_data(data: bytes):
     print(f"  Current Hatch: {current_hatch}")
     print(f"  Current Step: {current_step}")
     print(f"  Number of Points: {num_points}")
+    print(f"  Last Machine Position: {last_machine_position}")
     print(f"  Current Machine Position: {current_machine_position}")
     print(f"  Corner1: ({corner1_x:.3f}, {corner1_y:.3f}, {corner1_z:.3f})")
     print(f"  Corner2: ({corner2_x:.3f}, {corner2_y:.3f}, {corner2_z:.3f})")
@@ -2027,6 +2029,7 @@ async def parse_point_cloud_data(data: bytes):
             'version': version,
             'frame_id': frame_id,
             'is_detection_hatch': is_detection_hatch,
+            'last_machine_position': last_machine_position,
             'current_machine_position': current_machine_position,
             'current_hatch': current_hatch,
             'current_step': current_step,
@@ -2047,7 +2050,6 @@ async def parse_point_cloud_data(data: bytes):
       
         'points': points
     }
-
 
 async def get_point_cloud_from_websocket_persistent():
     """
@@ -2139,7 +2141,7 @@ async def get_point_cloud_from_websocket_persistent():
                 continue
 
 
-async def send_hatch_coordinates_to_websocket_persistent(hatch_corners, current_hatch, points_world=None):
+async def send_hatch_coordinates_to_websocket_persistent(hatch_corners, current_hatch, current_machine_position,points_world=None):
     """
     通过持久WebSocket连接发送舱口坐标到服务器
     
@@ -2161,6 +2163,7 @@ async def send_hatch_coordinates_to_websocket_persistent(hatch_corners, current_
         data_to_send = {
             "type": 1,
             "timestamp": int(time.time() * 1000),  # 毫秒时间戳
+            "current_machine_position": current_machine_position,
             "current_hatch": current_hatch,
             "lidar_coordinates": {
                 "corner1": {"x": float(hatch_corners[0][0]), "y": float(hatch_corners[0][1]), "z": float(hatch_corners[0][2])},
@@ -2280,7 +2283,7 @@ def lidar_to_world_with_x(points_lidar, translation, actual_x, rotation_angles=[
 
 
 
-def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[0, 0, 0], degrees=True):
+def world_to_lidar_with_x(points_world, translation, rotation_angles=[0, 0, 0], degrees=True):
     """
     将实际坐标系下的点转换到激光雷达坐标系，并减去实际x值
 
@@ -2311,7 +2314,7 @@ def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[
     # 3) 组合旋转：先轴向置换，再安装角
     R_total = R_install @ P
     
-    # 4) 平移向量
+    # 4) 平移向量，加入实际x值
     T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
     
     # 5) 逆向转换：先减去平移，再应用逆旋转
@@ -2352,7 +2355,7 @@ async def main():
             
             # 旋转角度 [roll, pitch, yaw] - 您可以自己调整这些角度
         # rotation_angles = [-6.1, 1.5, 0.44]  # 初始值，您可以根据需要修改
-        rotation_angles = [-6.05, 1.45, 0.77]
+        rotation_angles = [-6.05, 0.45, 0]
            
         while True:
             IS_FIRST_TIME = False
@@ -2366,6 +2369,7 @@ async def main():
                 await asyncio.sleep(0.5)  # 等待0.5秒后重试
                 continue
             is_detection_hatch = header_info.get('is_detection_hatch', 0)
+            last_machine_position = header_info.get('last_machine_position', 0) 
             current_machine_position = header_info.get('current_machine_position', 0)
             current_hatch = header_info.get('current_hatch', 0)
             #获取hatch_corners
@@ -2384,12 +2388,12 @@ async def main():
             world_corner4=world_corners.get('corner4')
 
             #矩形的中心世界坐标
-            world_center_x=(world_corner1['x']+world_corner2['x']+world_corner3['x']+world_corner4['x'])/4
+            world_center_x=(world_corner1['x']+world_corner2['x']+world_corner3['x']+world_corner4['x'])/4-current_machine_position
             world_center_y=(world_corner1['y']+world_corner2['y']+world_corner3['y']+world_corner4['y'])/4
             world_center_z=(world_corner1['z']+world_corner2['z']+world_corner3['z']+world_corner4['z'])/4
 
            
-            #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别
+            #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别S
             if hatch_corner1['x'] == 0 and hatch_corner1['y'] == 0 and hatch_corner1['z'] == 0 and \
                hatch_corner2['x'] == 0 and hatch_corner2['y'] == 0 and hatch_corner2['z'] == 0 and \
                hatch_corner3['x'] == 0 and hatch_corner3['y'] == 0 and hatch_corner3['z'] == 0 and \
@@ -2404,8 +2408,9 @@ async def main():
 
                 world_point = np.array([
                [world_center_x,world_center_y,world_center_z]
+               
             ])
-                radar_center_x, radar_center_y, radar_center_z = world_to_lidar_with_x(world_point,translation,current_machine_position,rotation_angles)[0]
+                radar_center_x, radar_center_y, radar_center_z = world_to_lidar_with_x(world_point,translation,rotation_angles)[0]
                  
             
            
@@ -2423,9 +2428,9 @@ async def main():
                 original_points,
                 x_initial_threshold=10.0, 
                 x_stat_percentage=0.5,
-                x_filter_offset=2.5,
+                x_filter_offset=3,
                 intensity_threshold=10.0, #强度
-                x_upper_bound_adjustment=1.8,
+                x_upper_bound_adjustment=0.5,
                 visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
             
             #调用聚类函数
@@ -2488,7 +2493,7 @@ async def main():
            
             
             # 发送舱口坐标到WebSocket服务器（使用持久连接）
-            await send_hatch_coordinates_to_websocket_persistent(hatch_corners_refined, current_hatch,points_world)
+            await send_hatch_coordinates_to_websocket_persistent(hatch_corners_refined, current_hatch,current_machine_position,points_world)
             
             if VISUALIZE_FINAL_RESULT:
                 visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)

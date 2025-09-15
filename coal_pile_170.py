@@ -200,9 +200,11 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     """
     # 输入验证
     if hatch_corners_refined is None or len(hatch_corners_refined) == 0:
+        logging.error("输入的船舱口顶点为空，无法进行分割。")
         return np.array([])
     
     if original_points.shape[1] < 4:
+        logging.error("输入的点云数据维度不足，无法进行分割。")
         return np.array([])
     
     # 1. 计算船舱四个顶点的x坐标平均值
@@ -262,6 +264,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     
     # 4. 合并两部分点云
     if len(part_one) == 0 and len(processed_part_two) == 0:
+        logging.error("两部分的点云都为空")
         return np.array([])
     elif len(part_one) == 0:
         combined_points_for_clustering = processed_part_two
@@ -272,12 +275,13 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     
     # 5. 对合并后的点云进行DBSCAN聚类
     if len(combined_points_for_clustering) == 0:
+        logging.error("合并后的点云数据为空，无法进行聚类。")
         return np.array([])
     
-   # 对combined_points_for_clustering进行离群点滤波
+
 
     # HDBSCAN聚类参数
-    hdbscan_eps_coal = 1
+    hdbscan_eps_coal = 1.3
     hdbscan_min_samples_coal = 20
     
     # 执行聚类（只使用XYZ坐标）
@@ -289,6 +293,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     unique_labels_coal, counts_coal = np.unique(labels_coal_cluster[labels_coal_cluster != -1], return_counts=True)
     
     if len(unique_labels_coal) == 0:
+        logging.error("聚类结果为空，无法找到最大聚类。")
         return np.array([])
     
     # 返回最大聚类的点
@@ -300,13 +305,13 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
 # WebSocket服务器配置
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 27052
-SERVER_PATH = "/point-cloud"
+SERVER_PATH = "/point-cloud-170"
 USER_ID = "coal-pile-detector-170"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
-# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
+# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -652,6 +657,12 @@ async def send_coal_pile_to_websocket_persistent(coal_pile_points, header_info, 
                 "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                 "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                 "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+            },
+            "world_corners": {
+                "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
+                "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
+                "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
+                "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
             }
         }
         
@@ -807,6 +818,7 @@ async def main():
             current_hatch = header_info.get('current_hatch', 0)
             current_step = header_info.get('current_step', 0)
             hatch_corners = header_info.get('hatch_corners', {})
+            world_corners = header_info.get('world_corners', {})
             if current_step != 1:
                 # print("当前计算信号不是1，跳过处理")    
                 continue
@@ -827,11 +839,18 @@ async def main():
                     "current_hatch": header_info.get('current_hatch', 0),
                     "point_count": len(coal_pile_points),
                     "detection_success": len(coal_pile_points) > 0,
+                    "current_unloadship":3,
                     "hatch_corners": {
                         "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
                         "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
                         "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+                    },
+                    "world_corners": {
+                        "corner1": {"x": float(world_corners['corner1']['x']), "y": float(world_corners['corner1']['y']), "z": float(world_corners['corner1']['z'])},
+                        "corner2": {"x": float(world_corners['corner2']['x']), "y": float(world_corners['corner2']['y']), "z": float(world_corners['corner2']['z'])},
+                        "corner3": {"x": float(world_corners['corner3']['x']), "y": float(world_corners['corner3']['y']), "z": float(world_corners['corner3']['z'])},
+                        "corner4": {"x": float(world_corners['corner4']['x']), "y": float(world_corners['corner4']['y']), "z": float(world_corners['corner4']['z'])}
                     }
                 }
                 # 添加煤堆点云数据
@@ -841,7 +860,7 @@ async def main():
                         "x": float(point[0]),
                         "y": float(point[1]),
                         "z": float(point[2]),
-                        "intensity": float(point[3]) if len(point) > 3 else 0.0
+                        #"intensity": float(point[3]) if len(point) > 3 else 0.0
                     })
                 coal_pile_data["coal_pile_points"] = points_list
                 

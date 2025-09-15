@@ -310,8 +310,8 @@ USER_ID = "coal-pile-detector-160"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
-# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
+# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -854,8 +854,8 @@ def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[
     # 3) 组合旋转：先轴向置换，再安装角
     R_total = R_install @ P
     
-    # 4) 平移向量 
-    T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
+    # 4) 平移向量，加入实际x值
+    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
     
     # 5) 逆向转换：先减去平移，再应用逆旋转
     # 逆旋转矩阵是原旋转矩阵的转置
@@ -940,6 +940,7 @@ async def main():
                     "current_hatch": header_info.get('current_hatch', 0),
                     "point_count": len(world_coal_pile_points),
                     "detection_success": len(world_coal_pile_points) > 0,
+                    "current_unloadship":4,
                     "hatch_corners": {
                         "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
                         "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},

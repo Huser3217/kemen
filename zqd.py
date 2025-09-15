@@ -310,8 +310,8 @@ USER_ID = "coal-pile-detector-170"
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
-# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIId II QQ II 12d 12d"
+# 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 当前执行步骤(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -421,6 +421,7 @@ async def parse_point_cloud_data(data: bytes):
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
                 magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
+                last_machine_position,
                 current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
@@ -453,6 +454,7 @@ async def parse_point_cloud_data(data: bytes):
     print(f"  Current Hatch: {current_hatch}")
     print(f"  Current Step: {current_step}")
     print(f"  Number of Points: {num_points}")
+    print(f"  Last Machine Position: {last_machine_position}")
     print(f"  Current Machine Position: {current_machine_position}")
     print(f"  Corner1: ({corner1_x:.3f}, {corner1_y:.3f}, {corner1_z:.3f})")
     print(f"  Corner2: ({corner2_x:.3f}, {corner2_y:.3f}, {corner2_z:.3f})")
@@ -496,6 +498,7 @@ async def parse_point_cloud_data(data: bytes):
             'version': version,
             'frame_id': frame_id,
             'is_detection_hatch': is_detection_hatch,
+            'last_machine_position': last_machine_position,
             'current_machine_position': current_machine_position,
             'current_hatch': current_hatch,
             'current_step': current_step,
@@ -511,11 +514,12 @@ async def parse_point_cloud_data(data: bytes):
             'corner2': {'x': world_corner2_x, 'y': world_corner2_y, 'z': world_corner2_z},
             'corner3': {'x': world_corner3_x, 'y': world_corner3_y, 'z': world_corner3_z},
             'corner4': {'x': world_corner4_x, 'y': world_corner4_y, 'z': world_corner4_z}
-        }
+        },
         },
       
         'points': points
     }
+
 
 
 
@@ -859,8 +863,8 @@ def world_to_lidar_with_x(points_world, translation, actual_x, rotation_angles=[
     # 3) 组合旋转：先轴向置换，再安装角
     R_total = R_install @ P
     
-    # 4) 平移向量
-    T = np.array([translation[0], translation[1], translation[2]]).reshape(3, 1)
+    # 4) 平移向量，加入实际x值
+    T = np.array([translation[0] + actual_x, translation[1], translation[2]]).reshape(3, 1)
     
     # 5) 逆向转换：先减去平移，再应用逆旋转
     # 逆旋转矩阵是原旋转矩阵的转置
@@ -1141,14 +1145,14 @@ async def main():
 
                 return next_line, direction
 
-            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于4米的话，就启动换线
+            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于4米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线
             current_line_height=line_heights_dict[current_line]
             #是否需要换线
             need_change_line=False
             for num, height in line_heights_dict.items():
                 if num!=current_line:
                     height_diff=abs(current_line_height-height)
-                    if height_diff>GrabPointCalculationConfig.height_diff:
+                    if height_diff>GrabPointCalculationConfig.height_diff and current_line_height<height:
                         logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                         #启动换线
                         need_change_line=True
@@ -1179,7 +1183,7 @@ async def main():
                   for num, height in line_heights_dict.items():
                       if num != current_line:
                           height_diff = abs(current_line_height - height)
-                          if height_diff > 4:
+                          if height_diff > GrabPointCalculationConfig.height_diff and current_line_height<height:
                               logger.info(f"新线高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，继续换线")
                               need_change_line = True
                               break
@@ -1307,7 +1311,9 @@ async def main():
                 'capture_point': capture_point,
                 'current_line_layer': int(current_line_layer),
                 'capture_point_layer': int(capture_point_layer),
-                'capture_point_layer_min_height': float(capture_point_layer_min_height)
+                'capture_point_layer_min_height': float(capture_point_layer_min_height),
+                'current_hatch': int(current_hatch),
+                'current_unLoadShip':3
             }
             print(f"煤堆数据已广播到所有连接的客户端")
             #发送给我连接的服务器

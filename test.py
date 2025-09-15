@@ -1826,7 +1826,7 @@ URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 计算信号(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIIdd II QQ II 3d 12d 12d"
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 12d 12d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -1939,8 +1939,6 @@ async def parse_point_cloud_data(data: bytes):
                 last_machine_position,
                 current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
-                #上次抓取点的坐标
-                last_capture_point_x, last_capture_point_y, last_capture_point_z,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
                 corner1_x, corner1_y, corner1_z,
                 corner2_x, corner2_y, corner2_z,
@@ -1973,7 +1971,6 @@ async def parse_point_cloud_data(data: bytes):
     print(f"  Number of Points: {num_points}")
     print(f"  Last Machine Position: {last_machine_position}")
     print(f"  Current Machine Position: {current_machine_position}")
-    print(f"  Last Capture Point: ({last_capture_point_x:.3f}, {last_capture_point_y:.3f}, {last_capture_point_z:.3f})")
     print(f"  Corner1: ({corner1_x:.3f}, {corner1_y:.3f}, {corner1_z:.3f})")
     print(f"  Corner2: ({corner2_x:.3f}, {corner2_y:.3f}, {corner2_z:.3f})")
     print(f"  Corner3: ({corner3_x:.3f}, {corner3_y:.3f}, {corner3_z:.3f})")
@@ -2021,8 +2018,6 @@ async def parse_point_cloud_data(data: bytes):
             'current_hatch': current_hatch,
             'current_step': current_step,
             'num_points': num_points,
-            #上次抓取点的坐标
-            'last_capture_point': {'x': last_capture_point_x, 'y': last_capture_point_y, 'z': last_capture_point_z},
             'hatch_corners': {
                 'corner1': {'x': corner1_x, 'y': corner1_y, 'z': corner1_z},
                 'corner2': {'x': corner2_x, 'y': corner2_y, 'z': corner2_z},
@@ -2043,97 +2038,6 @@ async def parse_point_cloud_data(data: bytes):
 
 
 
-# async def get_point_cloud_from_websocket_persistent():
-#     """
-#     从持久WebSocket连接获取点云数据并转换为numpy数组格式。
-#     """
-#     global ws_manager
-    
-#     if not ws_manager:
-#         print("WebSocket管理器未初始化")
-#         return None
-    
-#     # print("等待接收点云数据...")
-    
-#     while True:
-#         message = await ws_manager.receive_message()
-#         if message is None:
-#             print("接收消息失败")
-#             return None
-        
-#         # 检查是否为二进制数据
-#         if isinstance(message, bytes):
-#             # print(f"接收到二进制点云数据，长度: {len(message)} 字节")
-            
-#             try:
-#                 # 直接解析二进制点云数据
-#                 parsed_data = await parse_point_cloud_data(message)
-#                 if parsed_data and parsed_data['points']:
-#                     print(f"\n=== 成功获取点云数据 ===")
-#                     # print(f"点数: {len(parsed_data['points'])}")
-                    
-#                     # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
-#                     points_list = []
-#                     for point in parsed_data['points']:
-#                         points_list.append([
-#                             point['x'],
-#                             point['y'], 
-#                             point['z'],
-#                             point['refl']  # 使用反射强度作为Intensity
-#                         ])
-                    
-#                     points_array = np.array(points_list, dtype=np.float32)
-#                     # print(f"转换为numpy数组: {points_array.shape}")
-#                     return points_array, parsed_data['header']
-                    
-#             except Exception as e:
-#                 print(f"解析二进制数据失败: {e}")
-#                 continue
-                
-#         elif isinstance(message, str):
-#             # 保留对字符串消息的处理（用于兼容性）
-#             try:
-#                 json_data = json.loads(message)
-                
-#                 # 检查是否包含点云数据
-#                 if 'data$okio' in json_data and isinstance(json_data['data$okio'], str):
-#                     base64_data_str = json_data['data$okio']
-#                     print(f"接收到Base64编码的点云数据，长度: {len(base64_data_str)}")
-                    
-#                     try:
-#                         decoded_bytes = base64.b64decode(base64_data_str)
-#                         print(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
-                        
-#                         # 解析点云数据
-#                         parsed_data = await parse_point_cloud_data(decoded_bytes)
-#                         if parsed_data and parsed_data['points']:
-#                             print(f"\n=== 成功获取点云数据 ===")
-#                             print(f"点数: {len(parsed_data['points'])}")
-                            
-#                             # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
-#                             points_list = []
-#                             for point in parsed_data['points']:
-#                                 points_list.append([
-#                                     point['x'],
-#                                     point['y'], 
-#                                     point['z'],
-#                                     point['refl']  # 使用反射强度作为Intensity
-#                                 ])
-                            
-#                             points_array = np.array(points_list, dtype=np.float32)
-#                             print(f"转换为numpy数组: {points_array.shape}")
-#                             return points_array, parsed_data['header']
-                            
-#                     except base64.binascii.Error as e:
-#                         print(f"Base64解码失败: {e}")
-#                         continue
-                        
-#             except json.JSONDecodeError:
-#                 print("收到非JSON消息，跳过")
-#                 continue
-
-
-
 async def get_point_cloud_from_websocket_persistent():
     """
     从持久WebSocket连接获取点云数据并转换为numpy数组格式。
@@ -2147,38 +2051,22 @@ async def get_point_cloud_from_websocket_persistent():
     # print("等待接收点云数据...")
     
     while True:
-        # 开始计时：获取消息
-        receive_start_time = time.time()
         message = await ws_manager.receive_message()
-        receive_end_time = time.time()
-        receive_duration = receive_end_time - receive_start_time
-        
         if message is None:
             print("接收消息失败")
             return None
-        
-        logger.info(f"获取点云数据耗时: {receive_duration:.4f}秒")
         
         # 检查是否为二进制数据
         if isinstance(message, bytes):
             # print(f"接收到二进制点云数据，长度: {len(message)} 字节")
             
             try:
-                # 开始计时：解析数据
-                parse_start_time = time.time()
                 # 直接解析二进制点云数据
                 parsed_data = await parse_point_cloud_data(message)
-                parse_end_time = time.time()
-                parse_duration = parse_end_time - parse_start_time
-                
-                logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
-                
                 if parsed_data and parsed_data['points']:
                     print(f"\n=== 成功获取点云数据 ===")
                     # print(f"点数: {len(parsed_data['points'])}")
                     
-                    # 开始计时：转换为numpy数组
-                    convert_start_time = time.time()
                     # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
                     points_list = []
                     for point in parsed_data['points']:
@@ -2190,11 +2078,6 @@ async def get_point_cloud_from_websocket_persistent():
                         ])
                     
                     points_array = np.array(points_list, dtype=np.float32)
-                    convert_end_time = time.time()
-                    convert_duration = convert_end_time - convert_start_time
-                    
-                    logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
-                    logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
                     # print(f"转换为numpy数组: {points_array.shape}")
                     return points_array, parsed_data['header']
                     
@@ -2213,29 +2096,15 @@ async def get_point_cloud_from_websocket_persistent():
                     print(f"接收到Base64编码的点云数据，长度: {len(base64_data_str)}")
                     
                     try:
-                        # 开始计时：Base64解码
-                        decode_start_time = time.time()
                         decoded_bytes = base64.b64decode(base64_data_str)
-                        decode_end_time = time.time()
-                        decode_duration = decode_end_time - decode_start_time
+                        print(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
                         
-                        logger.info(f"Base64解码耗时: {decode_duration:.4f}秒")
-                        logger.info(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
-                        
-                        # 开始计时：解析点云数据
-                        parse_start_time = time.time()
+                        # 解析点云数据
                         parsed_data = await parse_point_cloud_data(decoded_bytes)
-                        parse_end_time = time.time()
-                        parse_duration = parse_end_time - parse_start_time
-                        
-                        logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
-                        
                         if parsed_data and parsed_data['points']:
                             print(f"\n=== 成功获取点云数据 ===")
                             print(f"点数: {len(parsed_data['points'])}")
                             
-                            # 开始计时：转换为numpy数组
-                            convert_start_time = time.time()
                             # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
                             points_list = []
                             for point in parsed_data['points']:
@@ -2247,12 +2116,7 @@ async def get_point_cloud_from_websocket_persistent():
                                 ])
                             
                             points_array = np.array(points_list, dtype=np.float32)
-                            convert_end_time = time.time()
-                            convert_duration = convert_end_time - convert_start_time
-                            
-                            logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
-                            logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
-                            # print(f"转换为numpy数组: {points_array.shape}")
+                            print(f"转换为numpy数组: {points_array.shape}")
                             return points_array, parsed_data['header']
                             
                     except base64.binascii.Error as e:
@@ -2262,6 +2126,7 @@ async def get_point_cloud_from_websocket_persistent():
             except json.JSONDecodeError:
                 print("收到非JSON消息，跳过")
                 continue
+
 
 
 # 添加WebSocket服务器类
@@ -2484,7 +2349,7 @@ async def main():
         while True:
             importlib.reload(config)
             IS_FIRST_TIME = False
-            # print("=== 从WebSocket获取点云数据 ===")             
+            # print("=== 从WebSocket获取点云数据 ===")            
             original_points, header_info = await get_point_cloud_from_websocket_persistent()
             
             if original_points is None or len(original_points) == 0:
@@ -2498,13 +2363,6 @@ async def main():
             is_detection_hatch = header_info.get('is_detection_hatch', 0)
             last_machine_position = header_info.get('last_machine_position', 0) 
             current_machine_position = header_info.get('current_machine_position', {})
-            last_capture_point = header_info.get('last_capture_point', {})
-
-
-            last_capture_point_x = last_capture_point.get('x', 0)
-            last_capture_point_y = last_capture_point.get('y', 0)
-            last_capture_point_z = last_capture_point.get('z', 0)
-            
 
             if current_step != 1:
                 # print("当前计算信号不是1，跳过处理")    
@@ -2524,7 +2382,7 @@ async def main():
                 [world_corners['corner4']['x'], world_corners['corner4']['y'], world_corners['corner4']['z']]
             ], dtype=np.float32)
 
-              #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别
+              #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别S
             if hatch_corners_refined[0][0] == 0 and hatch_corners_refined[0][1] == 0 and hatch_corners_refined[0][2] == 0 and \
                hatch_corners_refined[1][0] == 0 and hatch_corners_refined[1][1] == 0 and hatch_corners_refined[1][2] == 0 and \
                hatch_corners_refined[2][0] == 0 and hatch_corners_refined[2][1] == 0 and hatch_corners_refined[2][2] == 0 and \
@@ -2536,7 +2394,7 @@ async def main():
 
             else:
                 #矩形的中心世界坐标转为雷达坐标系中
-               
+                #TODO：yxy修改部分---------------------------------------------------------------------
                 hatch_center_x=(hatch_corners_refined[0][0]+hatch_corners_refined[1][0]+hatch_corners_refined[2][0]+hatch_corners_refined[3][0])/4
                 hatch_center_y=(hatch_corners_refined[0][1]+hatch_corners_refined[1][1]+hatch_corners_refined[2][1]+hatch_corners_refined[3][1])/4
                 hatch_center_z=(hatch_corners_refined[0][2]+hatch_corners_refined[1][2]+hatch_corners_refined[2][2]+hatch_corners_refined[3][2])/4
@@ -2680,10 +2538,7 @@ async def main():
             start_time_grab=time.time()
             line_width=config.GrabPointCalculationConfig.line_width  #线宽
             floor_height=config.GrabPointCalculationConfig.floor_height  #层高
-            safe_distance_x_negative_init=config.GrabPointCalculationConfig.safe_distance_x_negative_init  #大车左侧安全距离
-            safe_distance_x_positive_init=config.GrabPointCalculationConfig.safe_distance_x_positive_init  #大车右侧安全距离
-            safe_distance_y_ocean_init=config.GrabPointCalculationConfig.safe_distance_y_ocean_init  #海侧安全距离
-            safe_distance_y_land_init=config.GrabPointCalculationConfig.safe_distance_y_land_init  #陆侧安全距离
+            safe_distance_init=config.GrabPointCalculationConfig.safe_distance_init  #初始安全距离
             hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
             line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
             expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
@@ -2717,41 +2572,28 @@ async def main():
             logger.info(f"当前煤面在第{current_layer}层")
             #计算安全边界
             if current_layer<=4:
-                safe_distance_x_negative=safe_distance_x_negative_init-((current_layer-1)*expansion_x_front)
-                safe_distance_x_positive=safe_distance_x_positive_init-((current_layer-1)*expansion_x_front)
-                safe_distance_y_ocean=safe_distance_y_ocean_init-((current_layer-1)*expansion_y_front)
-                safe_distance_y_land=safe_distance_y_land_init-((current_layer-1)*expansion_y_front)
-                if safe_distance_x_negative<=0:
-                    safe_distance_x_negative=0
-                if safe_distance_x_positive<=0:
-                    safe_distance_x_positive=0
-                if safe_distance_y_ocean<=0:
-                    safe_distance_y_ocean=0
-                if safe_distance_y_land<=0:
-                    safe_distance_y_land=0
+                safe_distance_x=safe_distance_init-((current_layer-1)*expansion_x_front)
+                safe_distance_y=safe_distance_init-((current_layer-1)*expansion_y_front)
+                if safe_distance_x<=0:
+                    safe_distance_x=0
 
-                logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
-                logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
-                logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
-                logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+                if safe_distance_y<=0:
+                    safe_distance_y=0
+                
+
+                logger.info(f"当前安全距离x为：{safe_distance_x}")
+                logger.info(f"当前安全距离y为：{safe_distance_y}")
             else:
-                safe_distance_x_negative=safe_distance_x_negative_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
-                safe_distance_x_positive=safe_distance_x_positive_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
-                safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
-                safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
+                safe_distance_x=safe_distance_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
+                safe_distance_y=safe_distance_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
 
-                if safe_distance_x_negative<=0:
-                    safe_distance_x_negative=0
-                if safe_distance_x_positive<=0:
-                    safe_distance_x_positive=0
-                if safe_distance_y_ocean<=0:
-                    safe_distance_y_ocean=0
-                if safe_distance_y_land<=0:
-                    safe_distance_y_land=0
-                logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
-                logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
-                logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
-                logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+                if safe_distance_x<=0:
+                    safe_distance_x=0
+
+                if safe_distance_y<=0:
+                    safe_distance_y=0
+                logger.info(f"当前安全距离x为：{safe_distance_x}")
+                logger.info(f"当前安全距离y为：{safe_distance_y}")
 
             #计算舱口的长宽
             hatch_width=abs(points_world[1][1]-points_world[0][1])
@@ -2763,65 +2605,43 @@ async def main():
             #舱口长宽减去安全距离的xy坐标轴范围
 
             
-            x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x_negative
-            x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x_positive
+            x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x
+            x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x
             
-
-            y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+2.9
-            y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-2.9
+            #todo
+            y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y+2.9#Ocean
+            y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y-2.9#Land
             logger.info(f"x_positive为：{x_positive}")
             logger.info(f"x_negative为：{x_negative}")
             logger.info(f"y_ocean为：{y_ocean}")
             logger.info(f"y_land为：{y_land}")
 
-            # #第一条线的位置
+            #第一条线的位置
             
-            # line1_x_negative=current_machine_position-line_width/2
-            # line1_x_positive=current_machine_position+line_width/2
+            line1_x_negative=current_machine_position-line_width/2
+            line1_x_positive=current_machine_position+line_width/2
 
-            # lines= [[line1_x_negative,line1_x_positive]]
+            lines= [[line1_x_negative,line1_x_positive]]
 
-            # #向x轴负方向生成线
-            # negative_edge=line1_x_negative
-            # while True:
-            #   next_negative_edge=negative_edge-(line_width+line_gap)
-            #   if next_negative_edge>=x_negative:
-            #     lines.append([next_negative_edge,next_negative_edge+line_width])
-            #     negative_edge=next_negative_edge
-            #   else:
-            #     break
+            #向x轴负方向生成线
+            negative_edge=line1_x_negative
+            while True:
+              next_negative_edge=negative_edge-(line_width+line_gap)
+              if next_negative_edge>=x_negative:
+                lines.append([next_negative_edge,next_negative_edge+line_width])
+                negative_edge=next_negative_edge
+              else:
+                break
             
-            # #向x轴正方向生成线
-            # positive_edge=line1_x_positive
-            # while True:
-            #   next_positive_edge=positive_edge+(line_width+line_gap)
-            #   if next_positive_edge<=x_positive:
-            #     lines.append([next_positive_edge-line_width,next_positive_edge])
-            #     positive_edge=next_positive_edge
-            #   else:
-            #     break
-            
-            #现在先以x_negative和x_positive为线的中心基准，生成两条线
-            line1_x_negative=x_negative-line_width/2
-            line1_x_positive=x_negative+line_width/2
-            line2_x_negative=x_positive-line_width/2
-            line2_x_positive=x_positive+line_width/2
-            lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
-            
-            #剩下的x轴范围,两边都预留了半个line_gap的宽度
-            x_remaining=line2_x_negative-line1_x_positive-line_gap
-
-            #计算可以生成多少条线
-            num_lines=int(x_remaining/(line_width+line_gap))
-            #所以现在每条线的宽度为
-            line_w=x_remaining/num_lines
-            
-            for i in range(num_lines):
-                #线的中心点位置
-                line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
-
-                lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
-
+            #向x轴正方向生成线
+            positive_edge=line1_x_positive
+            while True:
+              next_positive_edge=positive_edge+(line_width+line_gap)
+              if next_positive_edge<=x_positive:
+                lines.append([next_positive_edge-line_width,next_positive_edge])
+                positive_edge=next_positive_edge
+              else:
+                break
             
             #给这些线编号，从负方向开始
             lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
@@ -2830,7 +2650,21 @@ async def main():
             for num, (x_min, x_max) in lines_dict.items():
                 logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
 
-
+            #根据大车当前位置，确定大车当前处于哪一条线
+            current_line=None
+            for num, (x_min, x_max) in lines_dict.items():
+                if current_machine_position>=x_min and current_machine_position<=x_max:
+                    current_line=num
+                    break
+            if current_line is None:
+                logger.info("大车当前位置不在任何一条线上")
+                #跳过这次循环
+                continue
+            else:
+                logger.info(f"大车当前处于第{current_line}条线")
+            
+            #定义一个字典，用来保存每条线的高度
+            line_heights_dict={}
 
             #提取每条线内的煤堆点，不仅有x的限制还有y方向的限制，计算每条线内的点的z坐标的平均值，作为这条线的高度
             for num, (x_min, x_max) in lines_dict.items():
@@ -2843,29 +2677,6 @@ async def main():
                 logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
                 #保存在一个字典内
                 line_heights_dict[num]=line_height
-
-
-            #根据大车当前位置，确定大车当前处于哪一条线
-            current_line=None
-            for num, (x_min, x_max) in lines_dict.items():
-                if current_machine_position>=x_min and current_machine_position<=x_max:
-                    current_line=num
-                    break
-            if current_line is None:
-                
-                logger.info("大车当前位置不在任何一条线上，将去往平均高度最高的那条线")
-                #获取平均高度最高的那条线
-                current_line=max(line_heights_dict, key=line_heights_dict.get)
-                logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
-                # #跳过这次循环
-                # continue.
-
-            else:
-                logger.info(f"大车当前处于第{current_line}条线")
-            
-
-            #定义一个字典，用来保存每条线的高度
-            line_heights_dict={}
 
             #定义一个函数，用来获取下一条线
             def get_next_line(current_line, direction, line_numbers):
@@ -2882,11 +2693,10 @@ async def main():
 
                 return next_line, direction
 
-            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
+            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于4米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线
             current_line_height=line_heights_dict[current_line]
             #是否需要换线
             need_change_line=False
-            need_calculate_two=False
             for num, height in line_heights_dict.items():
                 if num!=current_line:
                     height_diff=abs(current_line_height-height)
@@ -2894,8 +2704,6 @@ async def main():
                         logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                         #启动换线
                         need_change_line=True
-                        need_calculate_two=True
-
                         break
 
             #如果需要换线
@@ -2930,17 +2738,8 @@ async def main():
 
             logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
 
-            capture_point2={'x':0.0,'y':0.0,'z':0.0}
-            capture_point2_layer=0
-
-            #如果需要换线的话，我就要在当前线上一次性计算两个抓取点
-
-            #剔除上次中心点附近的四行四列范围就是一个4m*4m的正方形，然后抓取点处于这个正方形的中心点，现在我知道了这个点的坐标，我就能知道这个正方向的范围
-            remove_x_negative=last_capture_point_x-2
-            remove_x_positive=last_capture_point_x+2
-            remove_y_negative=last_capture_point_y-2
-            remove_y_positive=last_capture_point_y+2
-
+            
+            
             #获取当前线的点云
             current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
               # 提取在当前线框内且y坐标在安全范围内的点
@@ -2957,8 +2756,6 @@ async def main():
             #总共分了多少块
             total_blocks=n_y*n_x
             logger.info(f"当前线内的总块数为：{total_blocks}")
-
-
             for i in range(n_y):
               for j in range(n_x):
                 #计算当前分块的坐标
@@ -2966,36 +2763,16 @@ async def main():
                 x_max_block=x_min+(j+1)*block_width
                 y_min_block=y_min+i*block_length
                 y_max_block=y_min+(i+1)*block_length
-
-                                # 计算当前分块的面积
-                block_area = block_width * block_length
-
-                # 计算分块与上次抓取点区域的交集面积
-                overlap_x_min = max(x_min_block, remove_x_negative)
-                overlap_x_max = min(x_max_block, remove_x_positive)
-                overlap_y_min = max(y_min_block, remove_y_negative)
-                overlap_y_max = min(y_max_block, remove_y_positive)
-                # 判断是否有交集
-                if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                    overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                    overlap_ratio = overlap_area / block_area
-                    #如果当前分块有30%以上的范围落入了上次抓取点的附近，就将这个分块的平均高度设置为999
-                    if overlap_ratio >= 0.3:
-                            current_line_points_blocks_heights[(i, j)] = 999
-                            logger.info(f"分块({i},{j})与上次抓取区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-
-
-                else:
                 #提取当前分块的点云
-                    current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
-                    #将当前分块的点云存到字典中
-                    current_line_points_blocks[(i,j)]=current_line_points_block
-                    #计算当前分块的高度
-                    if len(current_line_points_block) > 0:
-                        current_line_points_block_height=current_line_points_block[:,2].mean()
-                    else:
-                        current_line_points_block_height=np.nan
-                        logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
+                current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
+                #将当前分块的点云存到字典中
+                current_line_points_blocks[(i,j)]=current_line_points_block
+                #计算当前分块的高度
+                if len(current_line_points_block) > 0:
+                    current_line_points_block_height=current_line_points_block[:,2].mean()
+                else:
+                    current_line_points_block_height=np.nan
+                    logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
                 #将当前分块的高度存到字典中
                 current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
 
@@ -3003,8 +2780,8 @@ async def main():
             for (i,j),height in current_line_points_blocks_heights.items():
               logger.info(f"分块({i},{j})的高度为：{height}")
             # 选取连续的面积为24的块，统计这些块的平均高度值。
-            # window_size =(24/(block_length*block_width))/(line_width/block_width)
-            window_size=6
+            window_size =(24/(block_length*block_width))/(line_width/block_width)
+            # window_size=6
             # 遍历所有可能的起点
             best_start_y = None
             best_avg_height = -np.inf
@@ -3012,26 +2789,15 @@ async def main():
             best_block_heights=[]
             for start_y in range(0, n_y - window_size + 1):
                 heights = []
-                has_invalid_block = False  # 标记是否包含高度为999的块
                 for i in range(start_y, start_y + window_size):
                     for j in range(n_x):
                         h = current_line_points_blocks_heights.get((i, j))
-                        if h == 999:
-                            has_invalid_block = True
-                            break  # 提前跳出当前列
                         if h is not None and not np.isnan(h):
                             heights.append(h)
-                    if has_invalid_block:
-                         break  # 提前跳出当前行
-
-                if has_invalid_block:
-                    logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
-                    continue
-
                 if heights:
                     avg_height = np.mean(heights)
                     if avg_height > best_avg_height:
-                      #记录当前块的高度
+                      #记录当前24块的高度
                         best_block_heights=heights
                         best_avg_height = avg_height
                         best_start_y = start_y
@@ -3076,171 +2842,17 @@ async def main():
             # print(f"抓取点的层号:{capture_point_layer}")
             #计算抓取点所处的那一层的最低点
             # capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
-            capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-            logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
-
-            if need_calculate_two:
-                remove_x_negative=capture_point['x']-2
-                remove_x_positive=capture_point['x']+2
-                remove_y_negative=capture_point['y']-2
-                remove_y_positive=capture_point['y']+2
-                
-                #获取当前线的点云
-                current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
-                  # 提取在当前线框内且y坐标在安全范围内的点
-                current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
-                  #计算当前线在哪一层
-                current_line_layer=math.ceil(abs(hatch_height-current_line_height) / floor_height)
-                #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中
-                current_line_points_blocks={}
-                current_line_points_blocks_heights={}
-                x_min, x_max = lines_dict[current_line]
-                y_min, y_max = y_land, y_ocean
-                n_y = int(floor((y_max - y_min) / block_length))
-                n_x = int(floor((x_max - x_min) / block_width))
-                #总共分了多少块
-                total_blocks=n_y*n_x
-                logger.info(f"当前线内的总块数为：{total_blocks}")
-                
-                
-                for i in range(n_y):
-                  for j in range(n_x):
-                    #计算当前分块的坐标
-                    x_min_block=x_min+j*block_width
-                    x_max_block=x_min+(j+1)*block_width
-                    y_min_block=y_min+i*block_length
-                    y_max_block=y_min+(i+1)*block_length
-                
-                                    # 计算当前分块的面积
-                    block_area = block_width * block_length
-                
-                    # 计算分块与上次抓取点区域的交集面积
-                    overlap_x_min = max(x_min_block, remove_x_negative)
-                    overlap_x_max = min(x_max_block, remove_x_positive)
-                    overlap_y_min = max(y_min_block, remove_y_negative)
-                    overlap_y_max = min(y_max_block, remove_y_positive)
-                    # 判断是否有交集
-                    if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                        overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                        overlap_ratio = overlap_area / block_area
-                        #如果当前分块有30%以上的范围落入了上次抓取点的附近，就将这个分块的平均高度设置为999
-                        if overlap_ratio >= 0.3:
-                                current_line_points_blocks_heights[(i, j)] = 999
-                                logger.info(f"分块({i},{j})与上次抓取区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-                
-                
-                    else:
-                    #提取当前分块的点云
-                        current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
-                        #将当前分块的点云存到字典中
-                        current_line_points_blocks[(i,j)]=current_line_points_block
-                        #计算当前分块的高度
-                        if len(current_line_points_block) > 0:
-                            current_line_points_block_height=current_line_points_block[:,2].mean()
-                        else:
-                            current_line_points_block_height=np.nan
-                            logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
-                    #将当前分块的高度存到字典中
-                    current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
-                
-                #打印存储的分块高度，加上索引
-                for (i,j),height in current_line_points_blocks_heights.items():
-                  logger.info(f"分块({i},{j})的高度为：{height}")
-                # 选取连续的面积为24的块，统计这些块的平均高度值。
-                # window_size =(24/(block_length*block_width))/(line_width/block_width)
-                window_size=6
-                # 遍历所有可能的起点
-                best_start_y = None
-                best_avg_height = -np.inf
-                best_blocks = None
-                best_block_heights=[]
-                for start_y in range(0, n_y - window_size + 1):
-                    heights = []
-                    has_invalid_block = False  # 标记是否包含高度为999的块
-                    for i in range(start_y, start_y + window_size):
-                        for j in range(n_x):
-                            h = current_line_points_blocks_heights.get((i, j))
-                            if h == 999:
-                                has_invalid_block = True
-                                break  # 提前跳出当前列
-                            if h is not None and not np.isnan(h):
-                                heights.append(h)
-                        if has_invalid_block:
-                             break  # 提前跳出当前行
-                                    
-                    if has_invalid_block:
-                        logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
-                        continue
-                                
-                    if heights:
-                        avg_height = np.mean(heights)
-                        if avg_height > best_avg_height:
-                          #记录当前块的高度
-                            best_block_heights=heights
-                            best_avg_height = avg_height
-                            best_start_y = start_y
-                            best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
-                            # 打印当前最佳块
-                            logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
-                
-                #打印最佳块
-                logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
-                #计算这些块的高度的方差
-                height_var=np.var(best_block_heights)
-                #打印这些块的高度的方差
-                logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
-                center_xs = []
-                center_ys = []
-                for (i, j) in best_blocks:
-                    # X 中心
-                    x_center = x_min + (j + 0.5) * block_width
-                    # Y 中心
-                    y_center = y_min + (i + 0.5) * block_length
-                    center_xs.append(x_center)
-                    center_ys.append(y_center)
-                
-                # 计算 XY 平面中心点
-                avg_x = np.mean(center_xs)
-                avg_y = np.mean(center_ys)
-                #判断这些块的高度的方差是否小于阈值
-                if height_var<plane_threshold:
-                  #如果小于阈值，就认为这些块是平面的
-                  logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
-                
-                  avg_height=best_avg_height+plane_distance
-                 
-                else:
-                  #如果大于阈值，就认为这些块不是平面的
-                  logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
-                  avg_height=best_avg_height+bevel_distance
-                
-                #计算抓取点处于哪一层
-                capture_point2_layer=math.ceil(abs(hatch_height-avg_height) / floor_height)
-                
-                # print(f"抓取点的层号:{capture_point_layer}")
-                #计算抓取点所处的那一层的最低点
-                # capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
-                capture_point2={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}") 
-
-
-
-
-
-
 
             #计算本线所处的那一层的最低点
             current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
 
-            
+            logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
                             #将抓取点的坐标发送到服务器
-
+            capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
             coal_pile_data["capture_point"] = capture_point
             coal_pile_data["capture_point_layer"]=capture_point_layer
             coal_pile_data["current_line_layer"]=current_line_layer
             coal_pile_data["min_height"]=float(current_line_layer_min_height)
-
-
 
              #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
             to_java_data={
@@ -3250,10 +2862,8 @@ async def main():
                 'points_world': points_world.tolist(),
                 'current_machine_position': current_machine_position,
                 'capture_point': capture_point,
-                'capture_point2':capture_point2,
                 'current_line_layer': int(current_line_layer),
                 'capture_point_layer': int(capture_point_layer),
-                'capture_point2_layer':int(capture_point2_layer),
                 'min_height': float(current_line_layer_min_height),
                 'current_hatch': int(current_hatch),
                 'current_unLoadShip':3
