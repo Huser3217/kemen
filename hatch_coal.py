@@ -2432,6 +2432,201 @@ def world_to_lidar_with_x(points_world, translation, rotation_angles=[0, 0, 0], 
     
     return points_lidar.T
 
+def calculate_capture_point(world_coal_pile_points, lines_dict, current_line, 
+                          exclude_x_center, exclude_y_center, exclude_radius,
+                          y_land, y_ocean, hatch_height, current_line_height, 
+                          floor_height, block_width, block_length, line_width,
+                          plane_threshold, plane_distance, bevel_distance, logger):
+    """
+    计算抓取点的核心函数
+    
+    Args:
+        world_coal_pile_points: 世界坐标系下的煤堆点云
+        lines_dict: 线段字典
+        current_line: 当前线段
+        exclude_x_center: 排除区域中心X坐标
+        exclude_y_center: 排除区域中心Y坐标  
+        exclude_radius: 排除区域半径
+        y_land: 陆地侧Y坐标
+        y_ocean: 海洋侧Y坐标
+        hatch_height: 舱口高度
+        current_line_height: 当前线高度
+        floor_height: 层高
+        block_width: 分块宽度
+        block_length: 分块长度
+        line_width: 线宽
+        plane_threshold: 平面阈值
+        plane_distance: 平面距离
+        bevel_distance: 斜面距离
+        logger: 日志记录器
+        
+    Returns:
+        dict: 包含抓取点坐标的字典 {'x': float, 'y': float, 'z': float}
+    """
+    # 计算排除区域边界
+    remove_x_negative = exclude_x_center - exclude_radius
+    remove_x_positive = exclude_x_center + exclude_radius
+    remove_y_negative = exclude_y_center - exclude_radius
+    remove_y_positive = exclude_y_center + exclude_radius
+
+    # 获取当前线的点云
+    current_line_points = world_coal_pile_points[
+        (world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & 
+        (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])
+    ]
+    # 提取在当前线框内且y坐标在安全范围内的点
+    current_line_points = current_line_points[
+        (current_line_points[:, 1] <= y_ocean) & 
+        (current_line_points[:, 1] >= y_land)
+    ]
+    
+    # 计算当前线在哪一层
+    current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
+    
+    # 将当前线的点云分成多个分块
+    current_line_points_blocks = {}
+    current_line_points_blocks_heights = {}
+    x_min, x_max = lines_dict[current_line]
+    y_min, y_max = y_land, y_ocean
+    n_y = int(floor((y_max - y_min) / block_length))
+    n_x = int(floor((x_max - x_min) / block_width))
+    
+    # 总共分了多少块
+    total_blocks = n_y * n_x
+    logger.info(f"当前线内的总块数为：{total_blocks}")
+
+    # 分块处理
+    for i in range(n_y):
+        for j in range(n_x):
+            # 计算当前分块的坐标
+            x_min_block = x_min + j * block_width
+            x_max_block = x_min + (j + 1) * block_width
+            y_min_block = y_min + i * block_length
+            y_max_block = y_min + (i + 1) * block_length
+
+            # 计算当前分块的面积
+            block_area = block_width * block_length
+
+            # 计算分块与排除区域的交集面积
+            overlap_x_min = max(x_min_block, remove_x_negative)
+            overlap_x_max = min(x_max_block, remove_x_positive)
+            overlap_y_min = max(y_min_block, remove_y_negative)
+            overlap_y_max = min(y_max_block, remove_y_positive)
+            
+            # 判断是否有交集
+            if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
+                overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
+                overlap_ratio = overlap_area / block_area
+                # 如果当前分块有30%以上的范围落入了排除区域，就将这个分块的平均高度设置为999
+                if overlap_ratio >= 0.3:
+                    current_line_points_blocks_heights[(i, j)] = 999
+                    logger.info(f"分块({i},{j})与排除区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
+                    continue
+
+            # 提取当前分块的点云
+            current_line_points_block = current_line_points[
+                (current_line_points[:, 0] >= x_min_block) & 
+                (current_line_points[:, 0] <= x_max_block) & 
+                (current_line_points[:, 1] >= y_min_block) & 
+                (current_line_points[:, 1] <= y_max_block)
+            ]
+            
+            # 将当前分块的点云存到字典中
+            current_line_points_blocks[(i, j)] = current_line_points_block
+            
+            # 计算当前分块的高度
+            if len(current_line_points_block) > 0:
+                current_line_points_block_height = current_line_points_block[:, 2].mean()
+            else:
+                current_line_points_block_height = np.nan
+                logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
+            
+            # 将当前分块的高度存到字典中
+            current_line_points_blocks_heights[(i, j)] = current_line_points_block_height
+
+    # 打印存储的分块高度
+    for (i, j), height in current_line_points_blocks_heights.items():
+        logger.info(f"分块({i},{j})的高度为：{height}")
+    
+    # 选取连续的面积为24的块，统计这些块的平均高度值
+    window_size = 6
+    
+    # 遍历所有可能的起点
+    best_start_y = None
+    best_avg_height = -np.inf
+    best_blocks = None
+    best_block_heights = []
+    
+    for start_y in range(0, n_y - window_size + 1):
+        heights = []
+        has_invalid_block = False  # 标记是否包含高度为999的块
+        
+        for i in range(start_y, start_y + window_size):
+            for j in range(n_x):
+                h = current_line_points_blocks_heights.get((i, j))
+                if h == 999:
+                    has_invalid_block = True
+                    break  # 提前跳出当前列
+                if h is not None and not np.isnan(h):
+                    heights.append(h)
+            if has_invalid_block:
+                break  # 提前跳出当前行
+
+        if has_invalid_block:
+            logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
+            continue
+
+        if heights:
+            avg_height = np.mean(heights)
+            if avg_height > best_avg_height:
+                # 记录当前块的高度
+                best_block_heights = heights
+                best_avg_height = avg_height
+                best_start_y = start_y
+                best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
+                # 打印当前最佳块
+                logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
+
+    # 打印最佳块
+    logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
+    
+    # 计算这些块的高度的方差
+    height_var = np.var(best_block_heights)
+    logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
+    
+    # 计算中心点坐标
+    center_xs = []
+    center_ys = []
+    for (i, j) in best_blocks:
+        # X 中心
+        x_center = x_min + (j + 0.5) * block_width
+        # Y 中心
+        y_center = y_min + (i + 0.5) * block_length
+        center_xs.append(x_center)
+        center_ys.append(y_center)
+
+    # 计算 XY 平面中心点
+    avg_x = np.mean(center_xs)
+    avg_y = np.mean(center_ys)
+    
+    # 判断这些块的高度的方差是否小于阈值
+    if height_var < plane_threshold:
+        # 如果小于阈值，就认为这些块是平面的
+        logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
+        avg_height = best_avg_height + plane_distance
+    else:
+        # 如果大于阈值，就认为这些块不是平面的
+        logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
+        avg_height = best_avg_height + bevel_distance
+
+    # 计算抓取点处于哪一层
+    capture_point_layer = math.ceil(abs(hatch_height - avg_height) / floor_height)
+    
+    # 创建抓取点字典
+    capture_point = {'x': float(avg_x), 'y': float(avg_y), 'z': float(avg_height)}
+    logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+    
+    return capture_point,capture_point_layer
 
 
 # 全局广播服务器实例
@@ -2933,295 +3128,62 @@ async def main():
             capture_point2={'x':0.0,'y':0.0,'z':0.0}
             capture_point2_layer=0
 
-            #如果需要换线的话，我就要在当前线上一次性计算两个抓取点
 
-            #剔除上次中心点附近的四行四列范围就是一个4m*4m的正方形，然后抓取点处于这个正方形的中心点，现在我知道了这个点的坐标，我就能知道这个正方向的范围
-            remove_x_negative=last_capture_point_x-2
-            remove_x_positive=last_capture_point_x+2
-            remove_y_negative=last_capture_point_y-2
-            remove_y_positive=last_capture_point_y+2
-
-            #获取当前线的点云
-            current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
-              # 提取在当前线框内且y坐标在安全范围内的点
-            current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
-              #计算当前线在哪一层
-            current_line_layer=math.ceil(abs(hatch_height-current_line_height) / floor_height)
-            #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中
-            current_line_points_blocks={}
-            current_line_points_blocks_heights={}
-            x_min, x_max = lines_dict[current_line]
-            y_min, y_max = y_land, y_ocean
-            n_y = int(floor((y_max - y_min) / block_length))
-            n_x = int(floor((x_max - x_min) / block_width))
-            #总共分了多少块
-            total_blocks=n_y*n_x
-            logger.info(f"当前线内的总块数为：{total_blocks}")
+            # 计算当前线在哪一层
+            current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
 
 
-            for i in range(n_y):
-              for j in range(n_x):
-                #计算当前分块的坐标
-                x_min_block=x_min+j*block_width
-                x_max_block=x_min+(j+1)*block_width
-                y_min_block=y_min+i*block_length
-                y_max_block=y_min+(i+1)*block_length
-
-                                # 计算当前分块的面积
-                block_area = block_width * block_length
-
-                # 计算分块与上次抓取点区域的交集面积
-                overlap_x_min = max(x_min_block, remove_x_negative)
-                overlap_x_max = min(x_max_block, remove_x_positive)
-                overlap_y_min = max(y_min_block, remove_y_negative)
-                overlap_y_max = min(y_max_block, remove_y_positive)
-                # 判断是否有交集
-                if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                    overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                    overlap_ratio = overlap_area / block_area
-                    #如果当前分块有30%以上的范围落入了上次抓取点的附近，就将这个分块的平均高度设置为999
-                    if overlap_ratio >= 0.3:
-                            current_line_points_blocks_heights[(i, j)] = 999
-                            logger.info(f"分块({i},{j})与上次抓取区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-
-
-                else:
-                #提取当前分块的点云
-                    current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
-                    #将当前分块的点云存到字典中
-                    current_line_points_blocks[(i,j)]=current_line_points_block
-                    #计算当前分块的高度
-                    if len(current_line_points_block) > 0:
-                        current_line_points_block_height=current_line_points_block[:,2].mean()
-                    else:
-                        current_line_points_block_height=np.nan
-                        logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
-                #将当前分块的高度存到字典中
-                current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
-
-            #打印存储的分块高度，加上索引
-            for (i,j),height in current_line_points_blocks_heights.items():
-              logger.info(f"分块({i},{j})的高度为：{height}")
-            # 选取连续的面积为24的块，统计这些块的平均高度值。
-            # window_size =(24/(block_length*block_width))/(line_width/block_width)
-            window_size=6
-            # 遍历所有可能的起点
-            best_start_y = None
-            best_avg_height = -np.inf
-            best_blocks = None
-            best_block_heights=[]
-            for start_y in range(0, n_y - window_size + 1):
-                heights = []
-                has_invalid_block = False  # 标记是否包含高度为999的块
-                for i in range(start_y, start_y + window_size):
-                    for j in range(n_x):
-                        h = current_line_points_blocks_heights.get((i, j))
-                        if h == 999:
-                            has_invalid_block = True
-                            break  # 提前跳出当前列
-                        if h is not None and not np.isnan(h):
-                            heights.append(h)
-                    if has_invalid_block:
-                         break  # 提前跳出当前行
-
-                if has_invalid_block:
-                    logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
-                    continue
-
-                if heights:
-                    avg_height = np.mean(heights)
-                    if avg_height > best_avg_height:
-                      #记录当前块的高度
-                        best_block_heights=heights
-                        best_avg_height = avg_height
-                        best_start_y = start_y
-                        best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
-                        # 打印当前最佳块
-                        logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
-
-            #打印最佳块
-            logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
-            #计算这些块的高度的方差
-            height_var=np.var(best_block_heights)
-            #打印这些块的高度的方差
-            logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
-            center_xs = []
-            center_ys = []
-            for (i, j) in best_blocks:
-                # X 中心
-                x_center = x_min + (j + 0.5) * block_width
-                # Y 中心
-                y_center = y_min + (i + 0.5) * block_length
-                center_xs.append(x_center)
-                center_ys.append(y_center)
-
-            # 计算 XY 平面中心点
-            avg_x = np.mean(center_xs)
-            avg_y = np.mean(center_ys)
-            #判断这些块的高度的方差是否小于阈值
-            if height_var<plane_threshold:
-              #如果小于阈值，就认为这些块是平面的
-              logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
-
-              avg_height=best_avg_height+plane_distance
-             
-            else:
-              #如果大于阈值，就认为这些块不是平面的
-              logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
-              avg_height=best_avg_height+bevel_distance
+        
+            # 计算第一个抓取点
+            capture_point, capture_point_layer = calculate_capture_point(
+                world_coal_pile_points=world_coal_pile_points,
+                lines_dict=lines_dict,
+                current_line=current_line,
+                exclude_x_center=last_capture_point_x,
+                exclude_y_center=last_capture_point_y,
+                exclude_radius=2,
+                y_land=y_land,
+                y_ocean=y_ocean,
+                hatch_height=hatch_height,
+                current_line_height=current_line_height,
+                floor_height=floor_height,
+                block_width=block_width,
+                block_length=block_length,
+                line_width=line_width,
+                plane_threshold=plane_threshold,
+                plane_distance=plane_distance,
+                bevel_distance=bevel_distance,
+                logger=logger
+            )
 
             #计算抓取点处于哪一层
-            capture_point_layer=math.ceil(abs(hatch_height-avg_height) / floor_height)
-            
-            # print(f"抓取点的层号:{capture_point_layer}")
-            #计算抓取点所处的那一层的最低点
-            # capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
-            capture_point={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-            logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
+            # capture_point_layer=math.ceil(abs(hatch_height-capture_point['z']) / floor_height)
 
             if need_calculate_two:
-                remove_x_negative=capture_point['x']-2
-                remove_x_positive=capture_point['x']+2
-                remove_y_negative=capture_point['y']-2
-                remove_y_positive=capture_point['y']+2
-                
-                #获取当前线的点云
-                current_line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])]
-                  # 提取在当前线框内且y坐标在安全范围内的点
-                current_line_points = current_line_points[(current_line_points[:, 1] <= y_ocean) & (current_line_points[:, 1] >= y_land)]
-                  #计算当前线在哪一层
-                current_line_layer=math.ceil(abs(hatch_height-current_line_height) / floor_height)
-                #将当前线的点云分成多个分块，y轴方向用block_height分，x轴方向用block_width分，将分好块存到一个字典中
-                current_line_points_blocks={}
-                current_line_points_blocks_heights={}
-                x_min, x_max = lines_dict[current_line]
-                y_min, y_max = y_land, y_ocean
-                n_y = int(floor((y_max - y_min) / block_length))
-                n_x = int(floor((x_max - x_min) / block_width))
-                #总共分了多少块
-                total_blocks=n_y*n_x
-                logger.info(f"当前线内的总块数为：{total_blocks}")
-                
-                
-                for i in range(n_y):
-                  for j in range(n_x):
-                    #计算当前分块的坐标
-                    x_min_block=x_min+j*block_width
-                    x_max_block=x_min+(j+1)*block_width
-                    y_min_block=y_min+i*block_length
-                    y_max_block=y_min+(i+1)*block_length
-                
-                                    # 计算当前分块的面积
-                    block_area = block_width * block_length
-                
-                    # 计算分块与上次抓取点区域的交集面积
-                    overlap_x_min = max(x_min_block, remove_x_negative)
-                    overlap_x_max = min(x_max_block, remove_x_positive)
-                    overlap_y_min = max(y_min_block, remove_y_negative)
-                    overlap_y_max = min(y_max_block, remove_y_positive)
-                    # 判断是否有交集
-                    if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                        overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                        overlap_ratio = overlap_area / block_area
-                        #如果当前分块有30%以上的范围落入了上次抓取点的附近，就将这个分块的平均高度设置为999
-                        if overlap_ratio >= 0.3:
-                                current_line_points_blocks_heights[(i, j)] = 999
-                                logger.info(f"分块({i},{j})与上次抓取区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-                
-                
-                    else:
-                    #提取当前分块的点云
-                        current_line_points_block=current_line_points[(current_line_points[:,0]>=x_min_block)&(current_line_points[:,0]<=x_max_block)&(current_line_points[:,1]>=y_min_block)&(current_line_points[:,1]<=y_max_block)]
-                        #将当前分块的点云存到字典中
-                        current_line_points_blocks[(i,j)]=current_line_points_block
-                        #计算当前分块的高度
-                        if len(current_line_points_block) > 0:
-                            current_line_points_block_height=current_line_points_block[:,2].mean()
-                        else:
-                            current_line_points_block_height=np.nan
-                            logger.warning(f"分块({i},{j})没有找到点云数据，设置高度为NaN")
-                    #将当前分块的高度存到字典中
-                    current_line_points_blocks_heights[(i,j)]=current_line_points_block_height
-                
-                #打印存储的分块高度，加上索引
-                for (i,j),height in current_line_points_blocks_heights.items():
-                  logger.info(f"分块({i},{j})的高度为：{height}")
-                # 选取连续的面积为24的块，统计这些块的平均高度值。
-                # window_size =(24/(block_length*block_width))/(line_width/block_width)
-                window_size=6
-                # 遍历所有可能的起点
-                best_start_y = None
-                best_avg_height = -np.inf
-                best_blocks = None
-                best_block_heights=[]
-                for start_y in range(0, n_y - window_size + 1):
-                    heights = []
-                    has_invalid_block = False  # 标记是否包含高度为999的块
-                    for i in range(start_y, start_y + window_size):
-                        for j in range(n_x):
-                            h = current_line_points_blocks_heights.get((i, j))
-                            if h == 999:
-                                has_invalid_block = True
-                                break  # 提前跳出当前列
-                            if h is not None and not np.isnan(h):
-                                heights.append(h)
-                        if has_invalid_block:
-                             break  # 提前跳出当前行
-                                    
-                    if has_invalid_block:
-                        logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
-                        continue
-                                
-                    if heights:
-                        avg_height = np.mean(heights)
-                        if avg_height > best_avg_height:
-                          #记录当前块的高度
-                            best_block_heights=heights
-                            best_avg_height = avg_height
-                            best_start_y = start_y
-                            best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
-                            # 打印当前最佳块
-                            logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
-                
-                #打印最佳块
-                logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
-                #计算这些块的高度的方差
-                height_var=np.var(best_block_heights)
-                #打印这些块的高度的方差
-                logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
-                center_xs = []
-                center_ys = []
-                for (i, j) in best_blocks:
-                    # X 中心
-                    x_center = x_min + (j + 0.5) * block_width
-                    # Y 中心
-                    y_center = y_min + (i + 0.5) * block_length
-                    center_xs.append(x_center)
-                    center_ys.append(y_center)
-                
-                # 计算 XY 平面中心点
-                avg_x = np.mean(center_xs)
-                avg_y = np.mean(center_ys)
-                #判断这些块的高度的方差是否小于阈值
-                if height_var<plane_threshold:
-                  #如果小于阈值，就认为这些块是平面的
-                  logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
-                
-                  avg_height=best_avg_height+plane_distance
-                 
-                else:
-                  #如果大于阈值，就认为这些块不是平面的
-                  logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
-                  avg_height=best_avg_height+bevel_distance
-                
+                # 计算第二个抓取点，排除第一个抓取点的区域
+                capture_point2, capture_point2_layer = calculate_capture_point(
+                    world_coal_pile_points=world_coal_pile_points,
+                    lines_dict=lines_dict,
+                    current_line=current_line,
+                    exclude_x_center=capture_point['x'],
+                    exclude_y_center=capture_point['y'],
+                    exclude_radius=2,
+                    y_land=y_land,
+                    y_ocean=y_ocean,
+                    hatch_height=hatch_height,
+                    current_line_height=current_line_height,
+                    floor_height=floor_height,
+                    block_width=block_width,
+                    block_length=block_length,
+                    line_width=line_width,
+                    plane_threshold=plane_threshold,
+                    plane_distance=plane_distance,
+                    bevel_distance=bevel_distance,
+                    logger=logger
+                )
+
                 #计算抓取点处于哪一层
-                capture_point2_layer=math.ceil(abs(hatch_height-avg_height) / floor_height)
-                
-                # print(f"抓取点的层号:{capture_point_layer}")
-                #计算抓取点所处的那一层的最低点
-                # capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
-                capture_point2={'x':float(avg_x),'y':float(avg_y),'z':float(avg_height)}
-                logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}") 
+                # capture_point2_layer=math.ceil(abs(hatch_height-capture_point2['z']) / floor_height) 
 
 
 
