@@ -2645,7 +2645,7 @@ async def main():
         await broadcast_server.start_server()
         print("广播服务器已启动")
     except Exception as e:
-        logger.error(f"启动广播服务器失败: {e}")
+        logger.error(f"启动广播服务器失败: {e}",exc_info= True)
         return
     
     
@@ -2677,496 +2677,476 @@ async def main():
         rotation_angles = [-6.05, 2.45, 0]
 
         while True:
-            importlib.reload(config)
-            IS_FIRST_TIME = False
-            # print("=== 从WebSocket获取点云数据 ===")             
-            original_points, header_info = await get_point_cloud_from_websocket_persistent()
-            
-            if original_points is None or len(original_points) == 0:
-                # print("错误: 无法从WebSocket获取点云数据，等待下一次尝试...")
-                await asyncio.sleep(0.5)  # 等待0.5秒后重试
-                continue
-            current_hatch = header_info.get('current_hatch', 0)
-            current_step = header_info.get('current_step', 0)
-            hatch_corners = header_info.get('hatch_corners', {})
-            world_corners = header_info.get('world_corners', {})
-            is_detection_hatch = header_info.get('is_detection_hatch', 0)
-            last_machine_position = header_info.get('last_machine_position', 0) 
-            current_machine_position = header_info.get('current_machine_position', {})
-            last_capture_point = header_info.get('last_capture_point', {})
+            try:
 
-
-            last_capture_point_x = last_capture_point.get('x', 0)
-            last_capture_point_y = last_capture_point.get('y', 0)
-            last_capture_point_z = last_capture_point.get('z', 0)
-            
-
-            if current_step != 1:
-                # print("当前计算信号不是1，跳过处理")    
-                continue
-             # 将角点数据转换为numpy数组格式 (4, 3)
-            hatch_corners_refined = np.array([
-                [hatch_corners['corner1']['x'], hatch_corners['corner1']['y'], hatch_corners['corner1']['z']],
-                [hatch_corners['corner2']['x'], hatch_corners['corner2']['y'], hatch_corners['corner2']['z']],
-                [hatch_corners['corner3']['x'], hatch_corners['corner3']['y'], hatch_corners['corner3']['z']],
-                [hatch_corners['corner4']['x'], hatch_corners['corner4']['y'], hatch_corners['corner4']['z']]
-            ], dtype=np.float32)
-
-            world_coords_refined = np.array([
-                [world_corners['corner1']['x'], world_corners['corner1']['y'], world_corners['corner1']['z']],
-                [world_corners['corner2']['x'], world_corners['corner2']['y'], world_corners['corner2']['z']],
-                [world_corners['corner3']['x'], world_corners['corner3']['y'], world_corners['corner3']['z']],
-                [world_corners['corner4']['x'], world_corners['corner4']['y'], world_corners['corner4']['z']]
-            ], dtype=np.float32)
-
-              #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别
-            if hatch_corners_refined[0][0] == 0 and hatch_corners_refined[0][1] == 0 and hatch_corners_refined[0][2] == 0 and \
-               hatch_corners_refined[1][0] == 0 and hatch_corners_refined[1][1] == 0 and hatch_corners_refined[1][2] == 0 and \
-               hatch_corners_refined[2][0] == 0 and hatch_corners_refined[2][1] == 0 and hatch_corners_refined[2][2] == 0 and \
-               hatch_corners_refined[3][0] == 0 and hatch_corners_refined[3][1] == 0 and hatch_corners_refined[3][2] == 0:
-
-
-                IS_FIRST_TIME=True
-                radar_center_x,radar_center_y,radar_center_z=0, 0,0
-
-            else:
-                #矩形的中心世界坐标转为雷达坐标系中
-               
-                hatch_center_x=(hatch_corners_refined[0][0]+hatch_corners_refined[1][0]+hatch_corners_refined[2][0]+hatch_corners_refined[3][0])/4
-                hatch_center_y=(hatch_corners_refined[0][1]+hatch_corners_refined[1][1]+hatch_corners_refined[2][1]+hatch_corners_refined[3][1])/4
-                hatch_center_z=(hatch_corners_refined[0][2]+hatch_corners_refined[1][2]+hatch_corners_refined[2][2]+hatch_corners_refined[3][2])/4
-                hatch_point = np.array([
-                    [hatch_center_x,hatch_center_y,hatch_center_z]
-                ])
+                IS_FIRST_TIME = False
+                # print("=== 从WebSocket获取点云数据 ===")             
+                original_points, header_info = await get_point_cloud_from_websocket_persistent()
                 
-                world_center_result = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)
-                world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
-                # world_center_x,world_center_y,world_center_z = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
-                world_center_x = world_center_x+(last_machine_position-current_machine_position)
-                world_point = np.array([
-                    [world_center_x,world_center_y,world_center_z]
-                ])
-                #------------------------------------------------------------------------------------------------------
+                if original_points is None or len(original_points) == 0:
+                    # print("错误: 无法从WebSocket获取点云数据，等待下一次尝试...")
+                    await asyncio.sleep(0.5)  # 等待0.5秒后重试
+                    continue
+
+                importlib.reload(config)
+                # print(config.GrabPointCalculationConfig.hatch_depth)
                 
-                radar_center_result = world_to_lidar_with_x(world_point,translation,rotation_angles)
-                radar_center_x, radar_center_y, radar_center_z = radar_center_result[0][0], radar_center_result[0][1], radar_center_result[0][2]
-                 
-
-            if VIS_ORIGINAL_3D:
-                visualize_pcd_3d(original_points[:, :3], title="原始点云数据")
-
-            start_time_hatch = time.time()
-            # 调用粗过滤函数
-            coarse_filtered_points = coarse_filtration_point_cloud(
-                original_points,
-                x_initial_threshold=10.0, 
-                x_stat_percentage=0.5,
-                x_filter_offset=3,
-                intensity_threshold=10.0, #强度
-                x_upper_bound_adjustment=0.5,
-                visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
-
-
-            refined_box_corners_yz=find_rectangle_by_histogram_method(coarse_filtered_points[:,:3],radar_center_y,radar_center_z,is_first_time=IS_FIRST_TIME,
-                                                                    visualize_steps=VISUALIZE_RECTANGLE,)
-
-        #如果船舱识别的舱口坐标为空，也就是船舱识别失败
-            if refined_box_corners_yz is None:
-
-                # 从3D坐标中提取YZ坐标，并赋值给 refined_box_corners_yz
-                # 假设X是深度，Y是水平，Z是垂直，那么YZ是第1和第2列
-                refined_box_corners_yz = hatch_corners_refined[:, 1:3]   
-
-
-
-
-            hatch_corners_refined, search_geometries, edge_sample_geometries = refine_x_coordinates_by_advanced_search(
-                    original_points,
-                    coarse_filtered_points[:,:3],
-                    refined_box_corners_yz,
-                    visualize_ranges=True
-                )
-            x1, y1, z1 = hatch_corners_refined[0]
-            x2, y2, z2 = hatch_corners_refined[1]
-            x3, y3, z3 = hatch_corners_refined[2]
-            x4, y4, z4 = hatch_corners_refined[3]     
-
-            points_lidar = np.array([
-                [x1, y1, z1],  # 第一个点
-                [x2, y2, z2],  # 第二个点
-                [x3, y3, z3],  # 第三个点
-                [x4, y4, z4],  # 第四个点
-            ])         
-
-            points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
-
-            print("世界坐标系下的点：")
-            for i, (x, y, z) in enumerate(points_world):
-                print(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")               
+                current_hatch = header_info.get('current_hatch', 0)
+                current_step = header_info.get('current_step', 0)
+                hatch_corners = header_info.get('hatch_corners', {})
+                world_corners = header_info.get('world_corners', {})
+                is_detection_hatch = header_info.get('is_detection_hatch', 0)
+                last_machine_position = header_info.get('last_machine_position', 0) 
+                current_machine_position = header_info.get('current_machine_position', {})
+                last_capture_point = header_info.get('last_capture_point', {})
+                
+                
+                last_capture_point_x = last_capture_point.get('x', 0)
+                last_capture_point_y = last_capture_point.get('y', 0)
+                last_capture_point_z = last_capture_point.get('z', 0)
+                
+                
+                if current_step != 1:
+                    # print("当前计算信号不是1，跳过处理")    
+                    continue
+                 # 将角点数据转换为numpy数组格式 (4, 3)
+                hatch_corners_refined = np.array([
+                    [hatch_corners['corner1']['x'], hatch_corners['corner1']['y'], hatch_corners['corner1']['z']],
+                    [hatch_corners['corner2']['x'], hatch_corners['corner2']['y'], hatch_corners['corner2']['z']],
+                    [hatch_corners['corner3']['x'], hatch_corners['corner3']['y'], hatch_corners['corner3']['z']],
+                    [hatch_corners['corner4']['x'], hatch_corners['corner4']['y'], hatch_corners['corner4']['z']]
+                ], dtype=np.float32)
+                
+                world_coords_refined = np.array([
+                    [world_corners['corner1']['x'], world_corners['corner1']['y'], world_corners['corner1']['z']],
+                    [world_corners['corner2']['x'], world_corners['corner2']['y'], world_corners['corner2']['z']],
+                    [world_corners['corner3']['x'], world_corners['corner3']['y'], world_corners['corner3']['z']],
+                    [world_corners['corner4']['x'], world_corners['corner4']['y'], world_corners['corner4']['z']]
+                ], dtype=np.float32)
+                
+                  #如果这四个顶点坐标都为（0，0，0），说明这是第一次识别
+                if hatch_corners_refined[0][0] == 0 and hatch_corners_refined[0][1] == 0 and hatch_corners_refined[0][2] == 0 and \
+                   hatch_corners_refined[1][0] == 0 and hatch_corners_refined[1][1] == 0 and hatch_corners_refined[1][2] == 0 and \
+                   hatch_corners_refined[2][0] == 0 and hatch_corners_refined[2][1] == 0 and hatch_corners_refined[2][2] == 0 and \
+                   hatch_corners_refined[3][0] == 0 and hatch_corners_refined[3][1] == 0 and hatch_corners_refined[3][2] == 0:
+                
+                
+                    IS_FIRST_TIME=True
+                    radar_center_x,radar_center_y,radar_center_z=0, 0,0
+                
+                else:
+                    #矩形的中心世界坐标转为雷达坐标系中
                    
-            if VISUALIZE_FINAL_RESULT:
-                visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
-
-            end_time_hatch = time.time()
-            hatch_time = end_time_hatch - start_time_hatch
-            logger.info(f"舱口识别时间为：{hatch_time}")
-
-
-
-
-
-
-            start_time_coal = time.time()
-            coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
-                        #将所有煤堆点转换为真实的坐标系下的点
-            world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
-            if len(world_coal_pile_points) > 0:
-                # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
-                 # 构造煤堆数据
-                coal_pile_data = {
-                    "frame_id": header_info.get('frame_id', 0),
-                    "current_hatch": header_info.get('current_hatch', 0),
-                    "point_count": len(world_coal_pile_points),
-                    "detection_success": len(world_coal_pile_points) > 0,
-                    "hatch_corners": {
-                        "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
-                        "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
-                        "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
-                        "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
-                    },
-                     "world_corners": {
-                        "corner1": {"x": float(points_world[0][0]), "y": float(points_world[0][1]), "z": float(points_world[0][2])},
-                        "corner2": {"x": float(points_world[1][0]), "y": float(points_world[1][1]), "z": float(points_world[1][2])},
-                        "corner3": {"x": float(points_world[2][0]), "y": float(points_world[2][1]), "z": float(points_world[2][2])},
-                        "corner4": {"x": float(points_world[3][0]), "y": float(points_world[3][1]), "z": float(points_world[3][2])}
+                    hatch_center_x=(hatch_corners_refined[0][0]+hatch_corners_refined[1][0]+hatch_corners_refined[2][0]+hatch_corners_refined[3][0])/4
+                    hatch_center_y=(hatch_corners_refined[0][1]+hatch_corners_refined[1][1]+hatch_corners_refined[2][1]+hatch_corners_refined[3][1])/4
+                    hatch_center_z=(hatch_corners_refined[0][2]+hatch_corners_refined[1][2]+hatch_corners_refined[2][2]+hatch_corners_refined[3][2])/4
+                    hatch_point = np.array([
+                        [hatch_center_x,hatch_center_y,hatch_center_z]
+                    ])
+                    
+                    world_center_result = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)
+                    world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
+                    # world_center_x,world_center_y,world_center_z = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
+                    world_center_x = world_center_x+(last_machine_position-current_machine_position)
+                    world_point = np.array([
+                        [world_center_x,world_center_y,world_center_z]
+                    ])
+                    #------------------------------------------------------------------------------------------------------
+                    
+                    radar_center_result = world_to_lidar_with_x(world_point,translation,rotation_angles)
+                    radar_center_x, radar_center_y, radar_center_z = radar_center_result[0][0], radar_center_result[0][1], radar_center_result[0][2]
+                     
+                
+                if VIS_ORIGINAL_3D:
+                    visualize_pcd_3d(original_points[:, :3], title="原始点云数据")
+                
+                start_time_hatch = time.time()
+                # 调用粗过滤函数
+                coarse_filtered_points = coarse_filtration_point_cloud(
+                    original_points,
+                    x_initial_threshold=10.0, 
+                    x_stat_percentage=0.5,
+                    x_filter_offset=3,
+                    intensity_threshold=10.0, #强度
+                    x_upper_bound_adjustment=0.5,
+                    visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
+                
+                
+                refined_box_corners_yz=find_rectangle_by_histogram_method(coarse_filtered_points[:,:3],radar_center_y,radar_center_z,is_first_time=IS_FIRST_TIME,
+                                                                        visualize_steps=VISUALIZE_RECTANGLE,)
+                
+                #如果船舱识别的舱口坐标为空，也就是船舱识别失败
+                if refined_box_corners_yz is None:
+                            
+                    # 从3D坐标中提取YZ坐标，并赋值给 refined_box_corners_yz
+                    # 假设X是深度，Y是水平，Z是垂直，那么YZ是第1和第2列
+                    refined_box_corners_yz = hatch_corners_refined[:, 1:3]   
+                
+                
+                
+                
+                hatch_corners_refined, search_geometries, edge_sample_geometries = refine_x_coordinates_by_advanced_search(
+                        original_points,
+                        coarse_filtered_points[:,:3],
+                        refined_box_corners_yz,
+                        visualize_ranges=True
+                    )
+                x1, y1, z1 = hatch_corners_refined[0]
+                x2, y2, z2 = hatch_corners_refined[1]
+                x3, y3, z3 = hatch_corners_refined[2]
+                x4, y4, z4 = hatch_corners_refined[3]     
+                
+                points_lidar = np.array([
+                    [x1, y1, z1],  # 第一个点
+                    [x2, y2, z2],  # 第二个点
+                    [x3, y3, z3],  # 第三个点
+                    [x4, y4, z4],  # 第四个点
+                ])         
+                
+                points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
+                
+                print("世界坐标系下的点：")
+                for i, (x, y, z) in enumerate(points_world):
+                    print(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")               
+                       
+                if VISUALIZE_FINAL_RESULT:
+                    visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
+                
+                end_time_hatch = time.time()
+                hatch_time = end_time_hatch - start_time_hatch
+                logger.info(f"舱口识别时间为：{hatch_time}")
+                
+                
+                
+                
+                
+                
+                start_time_coal = time.time()
+                coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
+                            #将所有煤堆点转换为真实的坐标系下的点
+                world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
+                if len(world_coal_pile_points) > 0:
+                    # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
+                     # 构造煤堆数据
+                    coal_pile_data = {
+                        "frame_id": header_info.get('frame_id', 0),
+                        "current_hatch": header_info.get('current_hatch', 0),
+                        "point_count": len(world_coal_pile_points),
+                        "detection_success": len(world_coal_pile_points) > 0,
+                        "hatch_corners": {
+                            "corner1": {"x": float(hatch_corners_refined[0][0]), "y": float(hatch_corners_refined[0][1]), "z": float(hatch_corners_refined[0][2])},
+                            "corner2": {"x": float(hatch_corners_refined[1][0]), "y": float(hatch_corners_refined[1][1]), "z": float(hatch_corners_refined[1][2])},
+                            "corner3": {"x": float(hatch_corners_refined[2][0]), "y": float(hatch_corners_refined[2][1]), "z": float(hatch_corners_refined[2][2])},
+                            "corner4": {"x": float(hatch_corners_refined[3][0]), "y": float(hatch_corners_refined[3][1]), "z": float(hatch_corners_refined[3][2])}
+                        },
+                         "world_corners": {
+                            "corner1": {"x": float(points_world[0][0]), "y": float(points_world[0][1]), "z": float(points_world[0][2])},
+                            "corner2": {"x": float(points_world[1][0]), "y": float(points_world[1][1]), "z": float(points_world[1][2])},
+                            "corner3": {"x": float(points_world[2][0]), "y": float(points_world[2][1]), "z": float(points_world[2][2])},
+                            "corner4": {"x": float(points_world[3][0]), "y": float(points_world[3][1]), "z": float(points_world[3][2])}
+                        }
                     }
-                }
-                # 添加煤堆点云数据
-                points_list = []
-                for point in world_coal_pile_points:
-                    points_list.append({
-                        "x": float(point[0]),
-                        "y": float(point[1]),
-                        "z": float(point[2]),
-                        #"intensity": float(point[3]) if len(point) > 3 else 0.0
-                    })
-                coal_pile_data["coal_pile_points"] = points_list
+                    # 添加煤堆点云数据
+                    points_list = []
+                    for point in world_coal_pile_points:
+                        points_list.append({
+                            "x": float(point[0]),
+                            "y": float(point[1]),
+                            "z": float(point[2]),
+                            #"intensity": float(point[3]) if len(point) > 3 else 0.0
+                        })
+                    coal_pile_data["coal_pile_points"] = points_list
+                    
+                    # 广播煤堆数据到所有客户端
+                    
+                    # await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                    # visualize_pcd_3d(coal_pile_points[:, :3])
+                    # print(f"煤堆数据已广播到所有连接的客户端")
+                    # 发送煤堆数据到WebSocket服务器
+                else:
+                    # print("未检测到煤堆")
+                    logger.info("未检测到煤堆")
                 
-                # 广播煤堆数据到所有客户端
+                end_time_coal = time.time()
+                coal_time = end_time_coal - start_time_coal
+                logger.info(f"煤堆分割时间为：{coal_time}")
                 
-                # await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-                # visualize_pcd_3d(coal_pile_points[:, :3])
-                # print(f"煤堆数据已广播到所有连接的客户端")
-                # 发送煤堆数据到WebSocket服务器
-            else:
-                # print("未检测到煤堆")
-                logger.info("未检测到煤堆")
-            
-            end_time_coal = time.time()
-            coal_time = end_time_coal - start_time_coal
-            logger.info(f"煤堆分割时间为：{coal_time}")
-
-
-
-
-
-
-
-            start_time_grab=time.time()
-            line_width=config.GrabPointCalculationConfig.line_width  #线宽
-            floor_height=config.GrabPointCalculationConfig.floor_height  #层高
-            safe_distance_x_negative_init=config.GrabPointCalculationConfig.safe_distance_x_negative_init  #大车左侧安全距离
-            safe_distance_x_positive_init=config.GrabPointCalculationConfig.safe_distance_x_positive_init  #大车右侧安全距离
-            safe_distance_y_ocean_init=config.GrabPointCalculationConfig.safe_distance_y_ocean_init  #海侧安全距离
-            safe_distance_y_land_init=config.GrabPointCalculationConfig.safe_distance_y_land_init  #陆侧安全距离
-            hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
-            line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
-            expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
-            expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
-            
-            expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
-            expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
-            block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
-            block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度    
-            plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
-            plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
-            bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
-            retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
-
-            #最大高度差
-            max_height_diff=hatch_depth-retain_height
-            #将所有煤堆点转换为真实的坐标系下的点
-            world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
-            #当前煤面的高度,即所有煤堆点的z坐标平均值
-            current_coal_height=world_coal_pile_points[:,2].mean()
-            #当前舱口高度
-            hatch_height=(points_world[0][2]+points_world[1][2]+points_world[2][2]+points_world[3][2])/4
-
-            #计算当前煤面的高度与舱口高度的差值
-            height_diff=abs(current_coal_height-hatch_height)
-            logger.info(f"当前煤面的高度为：{current_coal_height}")
-            logger.info(f"舱口的高度为：{hatch_height}")
-            logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
-            #计算当前煤面在哪一层
-            current_layer = math.ceil(height_diff / floor_height)
-            logger.info(f"当前煤面在第{current_layer}层")
-            #计算安全边界
-            if current_layer<=4:
-                safe_distance_x_negative=safe_distance_x_negative_init-((current_layer-1)*expansion_x_front)
-                safe_distance_x_positive=safe_distance_x_positive_init-((current_layer-1)*expansion_x_front)
-                safe_distance_y_ocean=safe_distance_y_ocean_init-((current_layer-1)*expansion_y_front)
-                safe_distance_y_land=safe_distance_y_land_init-((current_layer-1)*expansion_y_front)
-                if safe_distance_x_negative<=0:
-                    safe_distance_x_negative=0
-                if safe_distance_x_positive<=0:
-                    safe_distance_x_positive=0
-                if safe_distance_y_ocean<=0:
-                    safe_distance_y_ocean=0
-                if safe_distance_y_land<=0:
-                    safe_distance_y_land=0
-
-                logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
-                logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
-                logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
-                logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
-            else:
-                safe_distance_x_negative=safe_distance_x_negative_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
-                safe_distance_x_positive=safe_distance_x_positive_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
-                safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
-                safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
-
-                if safe_distance_x_negative<=0:
-                    safe_distance_x_negative=0
-                if safe_distance_x_positive<=0:
-                    safe_distance_x_positive=0
-                if safe_distance_y_ocean<=0:
-                    safe_distance_y_ocean=0
-                if safe_distance_y_land<=0:
-                    safe_distance_y_land=0
-                logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
-                logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
-                logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
-                logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
-
-            #计算舱口的长宽
-            hatch_width=abs(points_world[1][1]-points_world[0][1])
-            hatch_length=abs(points_world[2][0]-points_world[1][0])
-            logger.info(f"舱口的宽度为：{hatch_width}")
-            logger.info(f"舱口的长度为：{hatch_length}")
-
-            #确定线的位置
-            #舱口长宽减去安全距离的xy坐标轴范围
-
-            
-            x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x_negative
-            x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x_positive
-            
-
-            y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+2.9
-            y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-2.9
-            logger.info(f"x_positive为：{x_positive}")
-            logger.info(f"x_negative为：{x_negative}")
-            logger.info(f"y_ocean为：{y_ocean}")
-            logger.info(f"y_land为：{y_land}")
-
-            # #第一条线的位置
-            
-            # line1_x_negative=current_machine_position-line_width/2
-            # line1_x_positive=current_machine_position+line_width/2
-
-            # lines= [[line1_x_negative,line1_x_positive]]
-
-            # #向x轴负方向生成线
-            # negative_edge=line1_x_negative
-            # while True:
-            #   next_negative_edge=negative_edge-(line_width+line_gap)
-            #   if next_negative_edge>=x_negative:
-            #     lines.append([next_negative_edge,next_negative_edge+line_width])
-            #     negative_edge=next_negative_edge
-            #   else:
-            #     break
-            
-            # #向x轴正方向生成线
-            # positive_edge=line1_x_positive
-            # while True:
-            #   next_positive_edge=positive_edge+(line_width+line_gap)
-            #   if next_positive_edge<=x_positive:
-            #     lines.append([next_positive_edge-line_width,next_positive_edge])
-            #     positive_edge=next_positive_edge
-            #   else:
-            #     break
-            
-            #现在先以x_negative和x_positive为线的中心基准，生成两条线
-            line1_x_negative=x_negative-line_width/2
-            line1_x_positive=x_negative+line_width/2
-            line2_x_negative=x_positive-line_width/2
-            line2_x_positive=x_positive+line_width/2
-            lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
-            
-            #剩下的x轴范围,两边都预留了半个line_gap的宽度
-            x_remaining=line2_x_negative-line1_x_positive-line_gap
-
-            #计算可以生成多少条线
-            num_lines=int(x_remaining/(line_width+line_gap))
-            #所以现在每条线的宽度为
-            line_w=x_remaining/num_lines
-            
-            for i in range(num_lines):
-                #线的中心点位置
-                line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
-
-                lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
-
-            
-            #给这些线编号，从负方向开始
-            lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
-            # 给每条线编号（从负方向到正方向）
-            lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
-            for num, (x_min, x_max) in lines_dict.items():
-                logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
-
-
-
-            #提取每条线内的煤堆点，不仅有x的限制还有y方向的限制，计算每条线内的点的z坐标的平均值，作为这条线的高度
-            for num, (x_min, x_max) in lines_dict.items():
-                # 提取在当前线框内的点
-                line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= x_min) & (world_coal_pile_points[:, 0] <= x_max)]
-                # 提取在当前线框内且y坐标在安全范围内的点
-                line_points = line_points[(line_points[:, 1] <= y_ocean) & (line_points[:, 1] >= y_land)]
-                #计算这条线的高度
-                line_height=line_points[:,2].mean()
-                logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
-                #保存在一个字典内
-                line_heights_dict[num]=line_height
-
-
-            #根据大车当前位置，确定大车当前处于哪一条线
-            current_line=None
-            for num, (x_min, x_max) in lines_dict.items():
-                if current_machine_position>=x_min and current_machine_position<=x_max:
-                    current_line=num
-                    break
-            if current_line is None:
                 
-                logger.info("大车当前位置不在任何一条线上，将去往平均高度最高的那条线")
-                #获取平均高度最高的那条线
-                current_line=max(line_heights_dict, key=line_heights_dict.get)
-                logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
-                # #跳过这次循环
-                # continue.
+                
+                
+                
+                
+                
+                start_time_grab=time.time()
+                line_width=config.GrabPointCalculationConfig.line_width  #线宽
+                floor_height=config.GrabPointCalculationConfig.floor_height  #层高
+                safe_distance_x_negative_init=config.GrabPointCalculationConfig.safe_distance_x_negative_init  #大车左侧安全距离
+                safe_distance_x_positive_init=config.GrabPointCalculationConfig.safe_distance_x_positive_init  #大车右侧安全距离
+                safe_distance_y_ocean_init=config.GrabPointCalculationConfig.safe_distance_y_ocean_init  #海侧安全距离
+                safe_distance_y_land_init=config.GrabPointCalculationConfig.safe_distance_y_land_init  #陆侧安全距离
+                hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
+                line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
+                expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
+                expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
+                
+                expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
+                expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
+                block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
+                block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度    
+                plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
+                plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
+                bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+                retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
+                
+                #最大高度差
+                max_height_diff=hatch_depth-retain_height
+                #将所有煤堆点转换为真实的坐标系下的点
+                world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
+                #当前煤面的高度,即所有煤堆点的z坐标平均值
+                current_coal_height=world_coal_pile_points[:,2].mean()
+                #当前舱口高度
+                hatch_height=(points_world[0][2]+points_world[1][2]+points_world[2][2]+points_world[3][2])/4
+                
+                #计算当前煤面的高度与舱口高度的差值
+                height_diff=abs(current_coal_height-hatch_height)
+                logger.info(f"当前煤面的高度为：{current_coal_height}")
+                logger.info(f"舱口的高度为：{hatch_height}")
+                logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
+                #计算当前煤面在哪一层
+                current_layer = math.ceil(height_diff / floor_height)
+                logger.info(f"当前煤面在第{current_layer}层")
+                #计算安全边界
+                if current_layer<=4:
+                    safe_distance_x_negative=safe_distance_x_negative_init-((current_layer-1)*expansion_x_front)
+                    safe_distance_x_positive=safe_distance_x_positive_init-((current_layer-1)*expansion_x_front)
+                    safe_distance_y_ocean=safe_distance_y_ocean_init-((current_layer-1)*expansion_y_front)
+                    safe_distance_y_land=safe_distance_y_land_init-((current_layer-1)*expansion_y_front)
+                    if safe_distance_x_negative<=0:
+                        safe_distance_x_negative=0
+                    if safe_distance_x_positive<=0:
+                        safe_distance_x_positive=0
+                    if safe_distance_y_ocean<=0:
+                        safe_distance_y_ocean=0
+                    if safe_distance_y_land<=0:
+                        safe_distance_y_land=0
+                
+                    logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
+                    logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
+                    logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
+                    logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+                else:
+                    safe_distance_x_negative=safe_distance_x_negative_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
+                    safe_distance_x_positive=safe_distance_x_positive_init-(3*expansion_x_front)-((current_layer-4)*expansion_x_back)
+                    safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
+                    safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
+                
+                    if safe_distance_x_negative<=0:
+                        safe_distance_x_negative=0
+                    if safe_distance_x_positive<=0:
+                        safe_distance_x_positive=0
+                    if safe_distance_y_ocean<=0:
+                        safe_distance_y_ocean=0
+                    if safe_distance_y_land<=0:
+                        safe_distance_y_land=0
+                    logger.info(f"大车左侧安全距离为：{safe_distance_x_negative}")
+                    logger.info(f"大车右侧安全距离为：{safe_distance_x_positive}")
+                    logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
+                    logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+                
+                #计算舱口的长宽
+                hatch_width=abs(points_world[1][1]-points_world[0][1])
+                hatch_length=abs(points_world[2][0]-points_world[1][0])
+                logger.info(f"舱口的宽度为：{hatch_width}")
+                logger.info(f"舱口的长度为：{hatch_length}")
+                
+                #确定线的位置
+                #舱口长宽减去安全距离的xy坐标轴范围
+                
+                
+                x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x_negative
+                x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x_positive
+                
+                
+                y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+2.9
+                y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-2.9
+                logger.info(f"x_positive为：{x_positive}")
+                logger.info(f"x_negative为：{x_negative}")
+                logger.info(f"y_ocean为：{y_ocean}")
+                logger.info(f"y_land为：{y_land}")
+                
+                # #第一条线的位置
+                
+                # line1_x_negative=current_machine_position-line_width/2
+                # line1_x_positive=current_machine_position+line_width/2
+                
+                # lines= [[line1_x_negative,line1_x_positive]]
+                
+                # #向x轴负方向生成线
+                # negative_edge=line1_x_negative
+                # while True:
+                #   next_negative_edge=negative_edge-(line_width+line_gap)
+                #   if next_negative_edge>=x_negative:
+                #     lines.append([next_negative_edge,next_negative_edge+line_width])
+                #     negative_edge=next_negative_edge
+                #   else:
+                #     break
+                
+                # #向x轴正方向生成线
+                # positive_edge=line1_x_positive
+                # while True:
+                #   next_positive_edge=positive_edge+(line_width+line_gap)
+                #   if next_positive_edge<=x_positive:
+                #     lines.append([next_positive_edge-line_width,next_positive_edge])
+                #     positive_edge=next_positive_edge
+                #   else:
+                #     break
+                
+                #现在先以x_negative和x_positive为线的中心基准，生成两条线
+                line1_x_negative=x_negative-line_width/2
+                line1_x_positive=x_negative+line_width/2
+                line2_x_negative=x_positive-line_width/2
+                line2_x_positive=x_positive+line_width/2
+                lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
+                
+                #剩下的x轴范围,两边都预留了半个line_gap的宽度
+                x_remaining=line2_x_negative-line1_x_positive-line_gap
+                
+                #计算可以生成多少条线
+                num_lines=int(x_remaining/(line_width+line_gap))
+                #所以现在每条线的宽度为
+                line_w=x_remaining/num_lines
+                
+                for i in range(num_lines):
+                    #线的中心点位置
+                    line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
+                
+                    lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
+                
+                
+                #给这些线编号，从负方向开始
+                lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
+                # 给每条线编号（从负方向到正方向）
+                lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
+                for num, (x_min, x_max) in lines_dict.items():
+                    logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
+                
+                
+                #定义一个字典，用来保存每条线的高度
+                line_heights_dict={}
 
-            else:
-                logger.info(f"大车当前处于第{current_line}条线")
-            
-
-            #定义一个字典，用来保存每条线的高度
-            line_heights_dict={}
-
-            #定义一个函数，用来获取下一条线
-            def get_next_line(current_line, direction, line_numbers):
-                line_numbers = sorted(line_numbers)  # 确保从小到大
-                min_line = line_numbers[0]
-                max_line = line_numbers[-1]
-
-                next_line = current_line + direction
-
-                # 到达边界时反向
-                if next_line < min_line or next_line > max_line:
-                    direction *= -1
-                    next_line = current_line + direction
-
-                return next_line, direction
-
-            #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
-            current_line_height=line_heights_dict[current_line]
-            #是否需要换线
-            need_change_line=False
-            need_calculate_two=False
-            for num, height in line_heights_dict.items():
-                if num!=current_line:
-                    height_diff=abs(current_line_height-height)
-                    if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                        logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
-                        #启动换线
-                        need_change_line=True
-                        need_calculate_two=True
-
+                #提取每条线内的煤堆点，不仅有x的限制还有y方向的限制，计算每条线内的点的z坐标的平均值，作为这条线的高度
+                for num, (x_min, x_max) in lines_dict.items():
+                    # 提取在当前线框内的点
+                    line_points = world_coal_pile_points[(world_coal_pile_points[:, 0] >= x_min) & (world_coal_pile_points[:, 0] <= x_max)]
+                    # 提取在当前线框内且y坐标在安全范围内的点
+                    line_points = line_points[(line_points[:, 1] <= y_ocean) & (line_points[:, 1] >= y_land)]
+                    #计算这条线的高度
+                    line_height=line_points[:,2].mean()
+                    logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
+                    #保存在一个字典内
+                    line_heights_dict[num]=line_height
+                
+                
+                #根据大车当前位置，确定大车当前处于哪一条线
+                current_line=None
+                for num, (x_min, x_max) in lines_dict.items():
+                    if current_machine_position>=x_min and current_machine_position<=x_max:
+                        current_line=num
                         break
-
-            #如果需要换线
-            # if need_change_line:
-            #   #获取下一条线，线判断下一条线的与其他线的高度差是否大于4米，大于4米就还需要换线
-            #   next_line, persisted_line_change_direction = get_next_line(current_line, persisted_line_change_direction, list(lines_dict.keys()))
-
-            #   logger.info(f"换线到第{next_line}条线")
-            if need_change_line:
-              # 如果需要换线，就循环找下一条合适的线
-              while need_change_line:
-                  next_line, persisted_line_change_direction = get_next_line(
-                      current_line,
-                      persisted_line_change_direction,
-                      list(lines_dict.keys())
-                  )
-                  logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
-
-                  # 更新当前线
-                  current_line = next_line
-                  current_line_height = line_heights_dict[current_line]
+                if current_line is None:
+                    
+                    logger.info("大车当前位置不在任何一条线上，将去往平均高度最高的那条线")
+                    #获取平均高度最高的那条线
+                    current_line=max(line_heights_dict, key=line_heights_dict.get)
+                    logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
+                    # #跳过这次循环
+                    # continue.
                 
-                  # 再次判断新线是否需要换线
-                  need_change_line = False
-                  for num, height in line_heights_dict.items():
-                      if num != current_line:
-                          height_diff = abs(current_line_height - height)
-                          if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                              need_change_line = True
-                              break
+                else:
+                    logger.info(f"大车当前处于第{current_line}条线")
+                
 
 
-            logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
-
-            capture_point2={'x':0.0,'y':0.0,'z':0.0}
-            capture_point2_layer=0
-
-
-            # 计算当前线在哪一层
-            current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
-
-
-        
-            # 计算第一个抓取点
-            capture_point, capture_point_layer = calculate_capture_point(
-                world_coal_pile_points=world_coal_pile_points,
-                lines_dict=lines_dict,
-                current_line=current_line,
-                exclude_x_center=last_capture_point_x,
-                exclude_y_center=last_capture_point_y,
-                exclude_radius=2,
-                y_land=y_land,
-                y_ocean=y_ocean,
-                hatch_height=hatch_height,
-                current_line_height=current_line_height,
-                floor_height=floor_height,
-                block_width=block_width,
-                block_length=block_length,
-                line_width=line_width,
-                plane_threshold=plane_threshold,
-                plane_distance=plane_distance,
-                bevel_distance=bevel_distance,
-                logger=logger
-            )
-
-            #计算抓取点处于哪一层
-            # capture_point_layer=math.ceil(abs(hatch_height-capture_point['z']) / floor_height)
-
-            if need_calculate_two:
-                # 计算第二个抓取点，排除第一个抓取点的区域
-                capture_point2, capture_point2_layer = calculate_capture_point(
+                
+                #定义一个函数，用来获取下一条线
+                def get_next_line(current_line, direction, line_numbers):
+                    line_numbers = sorted(line_numbers)  # 确保从小到大
+                    min_line = line_numbers[0]
+                    max_line = line_numbers[-1]
+                
+                    next_line = current_line + direction
+                
+                    # 到达边界时反向
+                    if next_line < min_line or next_line > max_line:
+                        direction *= -1
+                        next_line = current_line + direction
+                
+                    return next_line, direction
+                
+                #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
+                current_line_height=line_heights_dict[current_line]
+                #是否需要换线
+                need_change_line=False
+                need_calculate_two=False
+                for num, height in line_heights_dict.items():
+                    if num!=current_line:
+                        height_diff=abs(current_line_height-height)
+                        if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
+                            #启动换线
+                            need_change_line=True
+                            need_calculate_two=True
+                
+                            break
+                                    
+                #如果需要换线
+                # if need_change_line:
+                #   #获取下一条线，线判断下一条线的与其他线的高度差是否大于4米，大于4米就还需要换线
+                #   next_line, persisted_line_change_direction = get_next_line(current_line, persisted_line_change_direction, list(lines_dict.keys()))
+                
+                #   logger.info(f"换线到第{next_line}条线")
+                if need_change_line:
+                  # 如果需要换线，就循环找下一条合适的线
+                  while need_change_line:
+                      next_line, persisted_line_change_direction = get_next_line(
+                          current_line,
+                          persisted_line_change_direction,
+                          list(lines_dict.keys())
+                      )
+                      logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
+                
+                      # 更新当前线
+                      current_line = next_line
+                      current_line_height = line_heights_dict[current_line]
+                    
+                      # 再次判断新线是否需要换线
+                      need_change_line = False
+                      for num, height in line_heights_dict.items():
+                          if num != current_line:
+                              height_diff = abs(current_line_height - height)
+                              if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                  need_change_line = True
+                                  break
+                                        
+                                        
+                logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
+                
+                capture_point2={'x':0.0,'y':0.0,'z':0.0}
+                capture_point2_layer=0
+                
+                
+                # 计算当前线在哪一层
+                current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
+                
+                
+                
+                # 计算第一个抓取点
+                capture_point, capture_point_layer = calculate_capture_point(
                     world_coal_pile_points=world_coal_pile_points,
                     lines_dict=lines_dict,
                     current_line=current_line,
-                    exclude_x_center=capture_point['x'],
-                    exclude_y_center=capture_point['y'],
+                    exclude_x_center=last_capture_point_x,
+                    exclude_y_center=last_capture_point_y,
                     exclude_radius=2,
                     y_land=y_land,
                     y_ocean=y_ocean,
@@ -3181,59 +3161,88 @@ async def main():
                     bevel_distance=bevel_distance,
                     logger=logger
                 )
-
+                
                 #计算抓取点处于哪一层
-                # capture_point2_layer=math.ceil(abs(hatch_height-capture_point2['z']) / floor_height) 
-
-
-
-
-
-
-
-            #计算本线所处的那一层的最低点
-            current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
-
-            
-                            #将抓取点的坐标发送到服务器
-
-            coal_pile_data["capture_point"] = capture_point
-            coal_pile_data["capture_point_layer"]=capture_point_layer
-            coal_pile_data["current_line_layer"]=current_line_layer
-            coal_pile_data["min_height"]=float(current_line_layer_min_height)
-
-
-
-             #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
-            to_java_data={
-                'type':2,
-                'timestamp': int(time.time() * 1000),  # 毫秒时间戳
-                'points_lidar': hatch_corners_refined.tolist(),
-                'points_world': points_world.tolist(),
-                'current_machine_position': current_machine_position,
-                'capture_point': capture_point,
-                'capture_point2':capture_point2,
-                'current_line_layer': int(current_line_layer),
-                'capture_point_layer': int(capture_point_layer),
-                'capture_point2_layer':int(capture_point2_layer),
-                'min_height': float(current_line_layer_min_height),
-                'current_hatch': int(current_hatch),
-                'current_unLoadShip':3
-            }
-            print(f"煤堆数据已广播到所有连接的客户端")
-            #发送给我连接的服务器
-            json_message = json.dumps(to_java_data, ensure_ascii=False)
-            await ws_manager.send_message(json_message)
-            await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
-            print(f"发送给java后台的数据:{to_java_data}")
-            
-
-            end_time_grab=time.time()
-            logger.info(f"计算时间为：{end_time_grab-start_time_grab}")
-
-
-                  
-
+                # capture_point_layer=math.ceil(abs(hatch_height-capture_point['z']) / floor_height)
+                
+                if need_calculate_two:
+                    # 计算第二个抓取点，排除第一个抓取点的区域
+                    capture_point2, capture_point2_layer = calculate_capture_point(
+                        world_coal_pile_points=world_coal_pile_points,
+                        lines_dict=lines_dict,
+                        current_line=current_line,
+                        exclude_x_center=capture_point['x'],
+                        exclude_y_center=capture_point['y'],
+                        exclude_radius=2,
+                        y_land=y_land,
+                        y_ocean=y_ocean,
+                        hatch_height=hatch_height,
+                        current_line_height=current_line_height,
+                        floor_height=floor_height,
+                        block_width=block_width,
+                        block_length=block_length,
+                        line_width=line_width,
+                        plane_threshold=plane_threshold,
+                        plane_distance=plane_distance,
+                        bevel_distance=bevel_distance,
+                        logger=logger
+                    )
+                
+                    #计算抓取点处于哪一层
+                    # capture_point2_layer=math.ceil(abs(hatch_height-capture_point2['z']) / floor_height) 
+                
+                
+                
+                
+                
+                
+                
+                #计算本线所处的那一层的最低点
+                current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
+                
+                
+                                #将抓取点的坐标发送到服务器
+                
+                coal_pile_data["capture_point"] = capture_point
+                coal_pile_data["capture_point_layer"]=capture_point_layer
+                coal_pile_data["current_line_layer"]=current_line_layer
+                coal_pile_data["min_height"]=float(current_line_layer_min_height)
+                
+                
+                
+                 #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
+                to_java_data={
+                    'type':2,
+                    'timestamp': int(time.time() * 1000),  # 毫秒时间戳
+                    'points_lidar': hatch_corners_refined.tolist(),
+                    'points_world': points_world.tolist(),
+                    'current_machine_position': current_machine_position,
+                    'capture_point': capture_point,
+                    'capture_point2':capture_point2,
+                    'current_line_layer': int(current_line_layer),
+                    'capture_point_layer': int(capture_point_layer),
+                    'capture_point2_layer':int(capture_point2_layer),
+                    'min_height': float(current_line_layer_min_height),
+                    'current_hatch': int(current_hatch),
+                    'current_unLoadShip':3
+                }
+                print(f"煤堆数据已广播到所有连接的客户端")
+                #发送给我连接的服务器
+                json_message = json.dumps(to_java_data, ensure_ascii=False)
+                await ws_manager.send_message(json_message)
+                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                print(f"发送给java后台的数据:{to_java_data}")
+                
+                
+                end_time_grab=time.time()
+                logger.info(f"计算时间为：{end_time_grab-start_time_grab}")
+                
+            except Exception as e:
+                # 记录异常但不退出循环
+                logger.error(f"单次处理循环出错: {e}", exc_info=True)
+                await asyncio.sleep(0.5)  # 等待0.5秒后继续下一次循环
+                continue  # 继续下一次while循环
+                
 
 
 
@@ -3273,7 +3282,8 @@ async def main():
         logger.info("程序被用户中断")
     except Exception as e:
         # print(f"程序运行出错: {e}")
-        logger.error(f"程序运行出错: {e}")
+        logger.error(f"程序运行出错: {e}",exc_info= True)
+        
     finally:
         # 确保在程序结束时关闭WebSocket连接
         if ws_manager:
@@ -3289,6 +3299,6 @@ if __name__ == "__main__":
         # print("\n程序已手动停止。")
         logger.info("程序已手动停止。")
     except Exception as e:
-        logger.error(f"程序运行出错: {e}")
+        logger.error(f"程序运行出错: {e}",exc_info= True)
 
 
