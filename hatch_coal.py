@@ -3087,7 +3087,7 @@ async def main():
                 current_line_height=line_heights_dict[current_line]
                 #是否需要换线
                 need_change_line=False
-                need_calculate_two=False
+
                 for num, height in line_heights_dict.items():
                     if num!=current_line:
                         height_diff=abs(current_line_height-height)
@@ -3095,7 +3095,7 @@ async def main():
                             logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                             #启动换线
                             need_change_line=True
-                            need_calculate_two=True
+
                 
                             break
                                     
@@ -3131,41 +3131,39 @@ async def main():
                                         
                 logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
                 
-                capture_point2={'x':0.0,'y':0.0,'z':0.0}
-                capture_point2_layer=0
+                # capture_point2={'x':0.0,'y':0.0,'z':0.0}
+                # capture_point2_layer=0
                 
                 
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
-                
-                
-                
-                # 计算第一个抓取点
-                capture_point, capture_point_layer = calculate_capture_point(
-                    world_coal_pile_points=world_coal_pile_points,
-                    lines_dict=lines_dict,
-                    current_line=current_line,
-                    exclude_x_center=last_capture_point_x,
-                    exclude_y_center=last_capture_point_y,
-                    exclude_radius=2,
-                    y_land=y_land,
-                    y_ocean=y_ocean,
-                    hatch_height=hatch_height,
-                    current_line_height=current_line_height,
-                    floor_height=floor_height,
-                    block_width=block_width,
-                    block_length=block_length,
-                    line_width=line_width,
-                    plane_threshold=plane_threshold,
-                    plane_distance=plane_distance,
-                    bevel_distance=bevel_distance,
-                    logger=logger
-                )
-                
-                #计算抓取点处于哪一层
-                # capture_point_layer=math.ceil(abs(hatch_height-capture_point['z']) / floor_height)
+                need_calculate_two=False
+                if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
+                    need_calculate_two=True
                 
                 if need_calculate_two:
+                    # 计算第一个抓取点
+                    capture_point, capture_point_layer = calculate_capture_point(
+                        world_coal_pile_points=world_coal_pile_points,
+                        lines_dict=lines_dict,
+                        current_line=current_line,
+                        exclude_x_center=last_capture_point_x,
+                        exclude_y_center=last_capture_point_y,
+                        exclude_radius=2,
+                        y_land=y_land,
+                        y_ocean=y_ocean,
+                        hatch_height=hatch_height,
+                        current_line_height=current_line_height,
+                        floor_height=floor_height,
+                        block_width=block_width,
+                        block_length=block_length,
+                        line_width=line_width,
+                        plane_threshold=plane_threshold,
+                        plane_distance=plane_distance,
+                        bevel_distance=bevel_distance,
+                        logger=logger
+                    )
+                    capture_point_effective=1
                     # 计算第二个抓取点，排除第一个抓取点的区域
                     capture_point2, capture_point2_layer = calculate_capture_point(
                         world_coal_pile_points=world_coal_pile_points,
@@ -3187,9 +3185,32 @@ async def main():
                         bevel_distance=bevel_distance,
                         logger=logger
                     )
-                
-                    #计算抓取点处于哪一层
-                    # capture_point2_layer=math.ceil(abs(hatch_height-capture_point2['z']) / floor_height) 
+
+                else:
+                    capture_point={'x':last_capture_point_x,'y':last_capture_point_y,'z':last_capture_point_z}
+                    capture_point_layer=0
+                    capture_point_effective=0
+                    capture_point2,capture_point2_layer=calculate_capture_point(
+                            world_coal_pile_points=world_coal_pile_points,
+                            lines_dict=lines_dict,
+                            current_line=current_line,
+                            exclude_x_center=last_capture_point_x,
+                            exclude_y_center=last_capture_point_y,
+                            exclude_radius=2,
+                            y_land=y_land,
+                            y_ocean=y_ocean,
+                            hatch_height=hatch_height,
+                            current_line_height=current_line_height,
+                            floor_height=floor_height,
+                            block_width=block_width,
+                            block_length=block_length,
+                            line_width=line_width,
+                            plane_threshold=plane_threshold,
+                            plane_distance=plane_distance,
+                            bevel_distance=bevel_distance,
+                            logger=logger
+                                    )
+
                 
                 
                 
@@ -3201,7 +3222,7 @@ async def main():
                 current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
                 
                 
-                                #将抓取点的坐标发送到服务器
+                #将抓取点的坐标发送到服务器
                 
                 coal_pile_data["capture_point"] = capture_point
                 coal_pile_data["capture_point_layer"]=capture_point_layer
@@ -3219,6 +3240,7 @@ async def main():
                     'current_machine_position': current_machine_position,
                     'capture_point': capture_point,
                     'capture_point2':capture_point2,
+                    'capture_point_effective':capture_point_effective,
                     'current_line_layer': int(current_line_layer),
                     'capture_point_layer': int(capture_point_layer),
                     'capture_point2_layer':int(capture_point2_layer),
