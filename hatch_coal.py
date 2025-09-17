@@ -3111,11 +3111,10 @@ async def main():
                 work_completed=False
                 if need_change_line:
                   # 如果需要换线，就循环找下一条合适的线
-                  while need_change_line:
                      # 记录已经尝试过的线，防止无限循环
-                      tried_lines = set([current_line])
-                      total_lines = len(lines_dict)
-
+                  tried_lines = set([current_line])
+                  total_lines = len(lines_dict)
+                  while need_change_line:
                       next_line, persisted_line_change_direction = get_next_line(
                           current_line,
                           persisted_line_change_direction,
