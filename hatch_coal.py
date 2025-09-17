@@ -1844,18 +1844,18 @@ class WebSocketManager:
     async def connect(self):
         """建立WebSocket连接"""
         attempts = 0
-        while attempts < self.max_reconnect_attempts:
+        while self.max_reconnect_attempts == -1 or attempts < self.max_reconnect_attempts:
             try:
-                # print(f"尝试连接到 WebSocket 服务器: {self.uri} (第{attempts + 1}次)")
+                print(f"尝试连接到 WebSocket 服务器: {self.uri} (第{attempts + 1}次)")
                 self.websocket = await websockets.connect(self.uri, max_size=8 * 1024 * 1024)
                 self.is_connected = True
                 print("WebSocket连接成功！")
                 return True
             except Exception as e:
                 attempts += 1
-                # print(f"WebSocket连接失败: {e}")
-                if attempts < self.max_reconnect_attempts:
-                    # print(f"等待 {self.reconnect_delay} 秒后重试...")
+                print(f"WebSocket连接失败: {e}")
+                if self.max_reconnect_attempts == -1 or attempts < self.max_reconnect_attempts:
+                    print(f"等待 {self.reconnect_delay} 秒后重试...")
                     await asyncio.sleep(self.reconnect_delay)
                 else:
                     logger.error("达到最大重连次数，连接失败")
@@ -2636,7 +2636,7 @@ async def main():
     global ws_manager, broadcast_server
     
     # 初始化WebSocket管理器
-    ws_manager = WebSocketManager(URI,5,1)
+    ws_manager = WebSocketManager(URI,-1,1)
     # 初始化广播服务器
     broadcast_server = CoalPileBroadcastServer(host="192.168.1.222", port=8765)
     
@@ -2650,9 +2650,7 @@ async def main():
     
     
     # 建立初始连接
-    if not await ws_manager.connect():
-        print("无法建立WebSocket连接，程序退出")
-        return
+    await ws_manager.connect()
     
     # 定义一个变量来存储换线方向
     # 1: 沿X轴正方向换线 (编号增加的方向)
@@ -2680,6 +2678,11 @@ async def main():
             try:
 
                 IS_FIRST_TIME = False
+
+                 # 简单检查连接状态，断开就重连
+                if not ws_manager.is_connected:
+                    print("WebSocket断开，重连中...")
+                    await ws_manager.connect()
                 # print("=== 从WebSocket获取点云数据 ===")             
                 original_points, header_info = await get_point_cloud_from_websocket_persistent()
                 
@@ -3105,16 +3108,21 @@ async def main():
                 #   next_line, persisted_line_change_direction = get_next_line(current_line, persisted_line_change_direction, list(lines_dict.keys()))
                 
                 #   logger.info(f"换线到第{next_line}条线")
+                work_completed=False
                 if need_change_line:
                   # 如果需要换线，就循环找下一条合适的线
                   while need_change_line:
+                     # 记录已经尝试过的线，防止无限循环
+                      tried_lines = set([current_line])
+                      total_lines = len(lines_dict)
+
                       next_line, persisted_line_change_direction = get_next_line(
                           current_line,
                           persisted_line_change_direction,
                           list(lines_dict.keys())
                       )
                       logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
-                
+                      tried_lines.add(next_line)
                       # 更新当前线
                       current_line = next_line
                       current_line_height = line_heights_dict[current_line]
@@ -3127,6 +3135,12 @@ async def main():
                               if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
                                   need_change_line = True
                                   break
+                      if len(tried_lines)==total_lines and need_change_line:
+                        work_completed=True
+                        #抛出一个指定的异常
+                        raise Exception("换线失败，已经尝试过所有的线，作业结束")
+
+                        break
                                         
                                         
                 logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
@@ -3137,6 +3151,7 @@ async def main():
                 
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
+                
                 need_calculate_two=False
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
                     need_calculate_two=True
@@ -3262,6 +3277,12 @@ async def main():
             except Exception as e:
                 # 记录异常但不退出循环
                 logger.error(f"单次处理循环出错: {e}", exc_info=True)
+                if "websocket" in str(e).lower() or "connection" in str(e).lower():
+                    ws_manager.is_connected = False
+                
+                if "换线失败" in str(e):
+                    logger.error(f"换线失败，已经尝试过所有的线，作业结束")
+
                 await asyncio.sleep(0.5)  # 等待0.5秒后继续下一次循环
                 continue  # 继续下一次while循环
                 
