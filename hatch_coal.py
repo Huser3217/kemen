@@ -965,8 +965,8 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
                 if total_pixel_count > 0:
                     white_ratio = white_pixel_count / total_pixel_count
                     
-                    # 当白色像素比例达到50%时，认为找到了边界
-                    if white_ratio >= 0.5:
+                    # 当白色像素比例达到40%时，认为找到了边界
+                    if white_ratio >= 0.4:
                         return dist
             
             # 如果扫描到图像边界都没找到边缘，返回最大扫描距离
@@ -1099,6 +1099,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
     
     #
     # return rectangle_corners_yz
+    logger.error("find_rectangle_in_yz_plane: 未找到满足条件的矩形")
     return None
 
 def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity, points_for_yz_refinement, refined_corners_yz, visualize_ranges=True):
@@ -1286,15 +1287,10 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
             else:
                 # 点数不足时使用全部点
                 edge_x_avg = np.mean(sorted_points)
-                # print(f"边 {i}: KD-tree查询到 {len(candidate_indices)} 个候选点，采样到 {len(edge_sample_points)} 个点，使用所有点平均x坐标: {edge_x_avg:.3f}")
-        else:
-            # # 未找到有效点时使用全局基准值
-            # edge_x_avg = avg_x_baseline
-            # print(f"边 {i}: KD-tree查询到 {len(candidate_indices)} 个候选点，但未采样到符合条件的点，使用全局平均值: {avg_x_baseline:.3f}")
-             # 未找到有效点时使用全局基准值
-            edge_x_avg = 999
-            # print(f"边 {i}: KD-tree查询到 {len(candidate_indices)} 个候选点，但未采样到符合条件的点，使用999")
 
+        else:
+
+            edge_x_avg = 999
         edge_x_averages.append(edge_x_avg)
 
     # ==================== 步骤5: 识别短边 ====================
@@ -1322,18 +1318,19 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
     # print(f"最终选择的短边索引: {short_edge_indices}")
 
     # ==================== 步骤6: 定义精细搜索区域 ====================
-    # 在短边的端点附近创建精细搜索区域，用于高精度X坐标计算
+    # 只对短边在中间范围内创建搜索区域，用于高精度X坐标计算
     
     # 搜索区域参数
     shorten_dist = 2        # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
     z_expand_min = -0.4       # Z方向向内扩展距离（米）
     z_expand_max = 0.8        # Z方向向外扩展距离（米）
-    search_rect_width = 1   # 搜索矩形宽度（米）
     x_search_range = 5        # X方向搜索范围（米）
 
     search_regions = []       # 存储搜索区域信息
     search_geometries = []    # 存储可视化几何体
+    edge_x_mapping = {}       # 存储每条边对应的X坐标值
 
+    # 只对短边进行中间范围搜索
     for edge_idx in short_edge_indices:
         p1, p2 = edges[edge_idx]
         edge_vec = p2 - p1
@@ -1364,98 +1361,117 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
         if np.dot(perp_vec, to_center) > 0:
             perp_vec = -perp_vec
 
-        # 为缩短边的两个端点创建搜索区域
-        for end_idx, end_point in enumerate([shortened_p1, shortened_p2]):
-            region_info = {
-                'center_yz': end_point,
-                'edge_idx': edge_idx,
-                'end_idx': end_idx,
-                'perp_direction': perp_vec,
-                'edge_direction': edge_unit,
-                'points': []
-            }
+        # 在缩短边的中间范围创建搜索区域（而不是在端点）
+        shortened_edge_length = np.linalg.norm(shortened_p2 - shortened_p1)
+        shortened_edge_center = (shortened_p1 + shortened_p2) / 2
+        
+        # 创建单个搜索区域覆盖整个缩短边的中间范围
+        region_info = {
+            'center_yz': shortened_edge_center,
+            'edge_idx': edge_idx,
+            'edge_start': shortened_p1,
+            'edge_end': shortened_p2,
+            'edge_length': shortened_edge_length,
+            'perp_direction': perp_vec,
+            'edge_direction': edge_unit,
+            'points': []
+        }
 
-            # 使用KD-tree进行高效的区域查询
-            search_radius = max(search_rect_width, z_expand_max - z_expand_min)
-            candidate_indices = kdtree_yz.query_radius([end_point], r=search_radius)[0]
-            
-            # 对候选点进行精确的几何筛选
-            for idx in candidate_indices:
-                point = full_original_points_with_intensity[idx]
-                point_yz = point[1:3]
-                point_x = point[0]
+        # 使用KD-tree进行高效的区域查询
+        search_radius =  shortened_edge_length / 2
+        candidate_indices = kdtree_yz.query_radius([shortened_edge_center], r=search_radius)[0]
+    
+        # 对候选点进行精确的几何筛选
+        for idx in candidate_indices:
+            point = full_original_points_with_intensity[idx]
+            point_yz = point[1:3]
+            point_x = point[0]
 
-                # 计算点相对于搜索区域中心的投影
-                to_point = point_yz - end_point
-                proj_along_edge = np.dot(to_point, edge_unit)   # 沿边方向投影
-                proj_perp_edge = np.dot(to_point, perp_vec)    # 垂直方向投影
+            # 计算点相对于搜索区域中心的投影
+            to_point = point_yz - shortened_edge_center
+            proj_along_edge = np.dot(to_point, edge_unit)   # 沿边方向投影
+            proj_perp_edge = np.dot(to_point, perp_vec)    # 垂直方向投影
 
-                # 筛选条件：在搜索矩形内 + X坐标范围内
-                if (abs(proj_along_edge) <= search_rect_width / 2 and
-                    z_expand_min <= proj_perp_edge <= z_expand_max):
-                    if abs(point_x - avg_x_baseline) <= x_search_range:
-                        region_info['points'].append(point)
+            # 筛选条件：在搜索矩形内 + X坐标范围内 + 在缩短边的范围内
+            if (abs(proj_along_edge) <= shortened_edge_length / 2 and
+                z_expand_min <= proj_perp_edge <= z_expand_max):
+                if abs(point_x - avg_x_baseline) <= x_search_range:
+                    region_info['points'].append(point)
 
-            search_regions.append(region_info)
-            # print(f"搜索区域 {len(search_regions)-1}: KD-tree查询到 {len(candidate_indices)} 个候选点，筛选后得到 {len(region_info['points'])} 个有效点")
+        search_regions.append(region_info)
+        # print(f"短边 {edge_idx} 搜索区域: KD-tree查询到 {len(candidate_indices)} 个候选点，筛选后得到 {len(region_info['points'])} 个有效点")
 
-            # ==================== 可视化搜索范围 ====================
-            # 创建3D可视化几何体以便调试和验证
-            if visualize_ranges:
-                # 创建搜索区域的3D包围盒
-                box_x_dim = x_search_range * 2
-                box_y_dim = search_rect_width
-                box_z_dim = (z_expand_max - z_expand_min)
+        # ==================== 可视化搜索范围 ====================
+        # 创建3D可视化几何体以便调试和验证
+        if visualize_ranges:
+            # 创建搜索区域的3D包围盒
+            box_x_dim = x_search_range * 2
+            box_y_dim = shortened_edge_length  # 使用缩短边的长度作为Y方向尺寸
+            box_z_dim = (z_expand_max - z_expand_min)
 
-                box = o3d.geometry.TriangleMesh.create_box(
-                    width=box_x_dim,
-                    height=box_y_dim,
-                    depth=box_z_dim
-                )
+            box = o3d.geometry.TriangleMesh.create_box(
+                width=box_x_dim,
+                height=box_y_dim,
+                depth=box_z_dim
+            )
 
-                # 将盒子中心移到原点
-                box.translate([-box_x_dim/2, -box_y_dim/2, -box_z_dim/2])
+            # 将盒子中心移到原点
+            box.translate([-box_x_dim/2, -box_y_dim/2, -box_z_dim/2])
 
-                # 创建旋转矩阵以对齐搜索方向
-                R = np.identity(3)
-                R[1, 1] = edge_unit[0]  # Y轴对齐边方向
-                R[2, 1] = edge_unit[1]
-                R[1, 2] = perp_vec[0]   # Z轴对齐垂直方向
-                R[2, 2] = perp_vec[1]
+            # 创建旋转矩阵以对齐搜索方向
+            R = np.identity(3)
+            R[1, 1] = edge_unit[0]  # Y轴对齐边方向
+            R[2, 1] = edge_unit[1]
+            R[1, 2] = perp_vec[0]   # Z轴对齐垂直方向
+            R[2, 2] = perp_vec[1]
 
-                box.rotate(R, center=(0,0,0))
+            box.rotate(R, center=(0,0,0))
 
-                # 移动到最终位置
-                box_yz_center = end_point + perp_vec * (z_expand_min + z_expand_max) / 2
-                final_box_center_3d = np.array([avg_x_baseline, box_yz_center[0], box_yz_center[1]])
+            # 移动到最终位置
+            box_yz_center = shortened_edge_center + perp_vec * (z_expand_min + z_expand_max) / 2
+            final_box_center_3d = np.array([avg_x_baseline, box_yz_center[0], box_yz_center[1]])
 
-                box.translate(final_box_center_3d)
-                box.paint_uniform_color([0.0, 0.8, 0.8])  # 青色
-                search_geometries.append(box)
+            box.translate(final_box_center_3d)
+            box.paint_uniform_color([0.0, 0.8, 0.8])  # 青色
+            search_geometries.append(box)
 
-                # 创建搜索方向指示箭头
-                arrow_start_yz = end_point + perp_vec * z_expand_min
-                arrow_end_yz = end_point + perp_vec * z_expand_max
+            # 创建搜索方向指示箭头
+            arrow_start_yz = shortened_edge_center + perp_vec * z_expand_min
+            arrow_end_yz = shortened_edge_center + perp_vec * z_expand_max
 
-                arrow_start_3d = np.array([avg_x_baseline, arrow_start_yz[0], arrow_start_yz[1]])
-                arrow_end_3d = np.array([avg_x_baseline, arrow_end_yz[0], arrow_end_yz[1]])
+            arrow_start_3d = np.array([avg_x_baseline, arrow_start_yz[0], arrow_start_yz[1]])
+            arrow_end_3d = np.array([avg_x_baseline, arrow_end_yz[0], arrow_end_yz[1]])
 
-                line_points = [arrow_start_3d, arrow_end_3d]
-                line_indices = [[0, 1]]
-                line_set = o3d.geometry.LineSet(
-                    points=o3d.utility.Vector3dVector(line_points),
-                    lines=o3d.utility.Vector2iVector(line_indices)
-                )
-                line_set.paint_uniform_color([1.0, 0.0, 0.0])  # 红色
-                search_geometries.append(line_set)
+            line_points = [arrow_start_3d, arrow_end_3d]
+            line_indices = [[0, 1]]
+            line_set = o3d.geometry.LineSet(
+                points=o3d.utility.Vector3dVector(line_points),
+                lines=o3d.utility.Vector2iVector(line_indices)
+            )
+            line_set.paint_uniform_color([1.0, 0.0, 0.0])  # 红色
+            search_geometries.append(line_set)
 
-    # print(f"创建了 {len(search_regions)} 个搜寻区域")
+            # 添加边界线可视化，显示缩短边的范围
+            edge_line_points = [
+                np.array([avg_x_baseline, shortened_p1[0], shortened_p1[1]]),
+                np.array([avg_x_baseline, shortened_p2[0], shortened_p2[1]])
+            ]
+            edge_line_indices = [[0, 1]]
+            edge_line_set = o3d.geometry.LineSet(
+                points=o3d.utility.Vector3dVector(edge_line_points),
+                lines=o3d.utility.Vector2iVector(edge_line_indices)
+            )
+            edge_line_set.paint_uniform_color([0.0, 1.0, 0.0])  # 绿色
+            search_geometries.append(edge_line_set)
 
-    # ==================== 步骤7: 计算区域X坐标统计值 ====================
-    # 使用改进的统计策略计算每个搜索区域的最优X坐标
-    region_x_values = []
+    # print(f"创建了 {len(search_regions)} 个短边搜寻区域")
+
+    # ==================== 步骤7: 计算短边区域X坐标统计值 ====================
+    # 使用改进的统计策略计算每个短边搜索区域的最优X坐标
     for i, region in enumerate(search_regions):
         points_in_region = np.array(region['points'])
+        edge_idx = region['edge_idx']
+        
         if len(points_in_region) > 20:
             # 点数充足时使用统计筛选策略
             x_coords = points_in_region[:, 0]
@@ -1468,97 +1484,54 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
                     # 使用接下来最小的7个点计算平均值
                     selected_x = filtered_x[:7]
                     avg_x = np.mean(selected_x)
-                    region_x_values.append(avg_x)
-                    # print(f"区域 {i}: 找到 {len(points_in_region)} 个点，筛选后取最小7点平均x坐标: {avg_x:.3f}")
+                    edge_x_mapping[edge_idx] = avg_x
+                    # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，筛选后取最小7点平均x坐标: {avg_x:.3f}")
                 else:
                     # 筛选后点数不足时使用全部筛选点
                     avg_x = np.mean(filtered_x)
-                    region_x_values.append(avg_x)
-                    # print(f"区域 {i}: 找到 {len(points_in_region)} 个点，使用 {len(filtered_x)} 个点平均x坐标: {avg_x:.3f}")
+                    edge_x_mapping[edge_idx] = avg_x
+                    # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，使用 {len(filtered_x)} 个点平均x坐标: {avg_x:.3f}")
             else:
                 # 总点数不足时使用全部点
                 avg_x = np.mean(sorted_x)
-                region_x_values.append(avg_x)
-                # print(f"区域 {i}: 找到 {len(points_in_region)} 个点，使用所有点平均X坐标: {avg_x:.3f}")
+                edge_x_mapping[edge_idx] = avg_x
+                # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，使用所有点平均X坐标: {avg_x:.3f}")
         elif len(points_in_region) > 0:
             # 点数较少时的处理策略
             avg_x = np.mean(points_in_region[:, 0])
-            region_x_values.append(avg_x)
-            # print(f"区域 {i}: 只找到 {len(points_in_region)} 个点，使用平均X坐标: {avg_x:.3f}")
+            edge_x_mapping[edge_idx] = avg_x
+
         else:
-            # 未找到点时先标记为None，稍后处理
-            region_x_values.append(999)
-            # print(f"区域 {i}: 未找到点，稍后处理")
-    
-    # # ==================== 步骤7.5: 处理未找到点的区域 ====================
-    # # 在所有区域搜寻完成后，单独处理没有找到点的区域
-    # for i, x_value in enumerate(region_x_values):
-    #     if x_value is None:
-    #         current_region = search_regions[i]
-    #         edge_idx = current_region['edge_idx']
-    #         end_idx = current_region['end_idx']
-            
-    #         # 寻找同一条边上的另一个搜索区域
-    #         same_edge_x = None
-    #         for j, other_region in enumerate(search_regions):
-    #             if j != i and other_region['edge_idx'] == edge_idx and other_region['end_idx'] != end_idx:
-    #                 # 找到同一条边上的另一个区域，检查是否有有效的X坐标
-    #                 if region_x_values[j] is not None:
-    #                     same_edge_x = region_x_values[j]
-    #                     break
-            
-    #         if same_edge_x is not None:
-    #             region_x_values[i] = 999
-    #             # print(f"区域 {i}: 使用同一条边上另一个顶点的X坐标: {same_edge_x:.3f}")
-               
-    #         else:
-    #             # 如果同一条边上的另一个顶点也没有找到点，则使用全局基准值作为后备
-    #             region_x_values[i] = 999
-    #             # print(f"区域 {i}: 同边顶点也无有效坐标，使用全局平均X坐标: {avg_x_baseline:.3f}")
 
+            pass
 
-     
-    refined_corners_3d = np.zeros((4, 3))
- 
     # ==================== 步骤8: X坐标分配给矩形顶点 ====================
     # 将计算出的X坐标分配给对应的矩形角点，完成3D重建
-  
+    refined_corners_3d = np.zeros((4, 3))
+    
     for vertex_idx in range(4):
         vertex_yz = refined_corners_yz[vertex_idx]
+        
+        # 确定与该顶点相关的边
+        # 顶点i连接到边i和边(i-1)%4
+        connected_edges = [vertex_idx, (vertex_idx - 1) % 4]
+        
+        # 寻找与该顶点相关的边中有有效X坐标的短边
+        assigned_x = None
+        for edge_idx in connected_edges:
+            if edge_idx in edge_x_mapping:
+                assigned_x = edge_x_mapping[edge_idx]
+                # print(f"顶点 {vertex_idx}: 使用短边 {edge_idx} 的X坐标: {assigned_x:.3f}")
+                break
+        
+        if assigned_x is None:
+            # 如果相关的边都不是短边或没有有效的X坐标，使用全局基准X坐标
+            assigned_x = avg_x_baseline
+            # print(f"顶点 {vertex_idx}: 相关边无短边坐标，使用全局平均X坐标: {assigned_x:.3f}")
+        
+        refined_corners_3d[vertex_idx] = [assigned_x, vertex_yz[0], vertex_yz[1]]
 
-        # 计算顶点到各搜索区域中心的距离
-        distances = []
-        for region in search_regions:
-            dist = np.linalg.norm(vertex_yz - region['center_yz'])
-            distances.append(dist)
 
-        if len(distances) > 0:
-            # 分配最近搜索区域的X坐标
-            nearest_region_idx = np.argmin(distances)
-            assigned_x = region_x_values[nearest_region_idx]
-            refined_corners_3d[vertex_idx] = [assigned_x, vertex_yz[0], vertex_yz[1]]
-            # print(f"顶点 {vertex_idx}: 分配到区域 {nearest_region_idx}，X坐标: {assigned_x:.3f}")
-        else:
-            # 后备方案：使用全局基准X坐标
-            avg_x = avg_x_baseline
-            refined_corners_3d[vertex_idx] = [avg_x, vertex_yz[0], vertex_yz[1]]
-            # print(f"顶点 {vertex_idx}: 使用后备X坐标: {avg_x:.3f}")
-#处理点的高度差值大于1.5的情况，如果z轴方向同一条边上的两个顶点高度差大于1.5米的话，就修改高度大的点的高度为小的点的高度
-    for i in [0, 2]:
-        if np.abs(refined_corners_3d[i,0]-refined_corners_3d[(i+1)%4,0])>1.5:
-            diff=np.abs(refined_corners_3d[(i+2)%4,0]-refined_corners_3d[(i+3)%4,0])
-            if refined_corners_3d[i,0]>refined_corners_3d[(i+1)%4,0]:
-              if refined_corners_3d[(i+3)%4,0]>refined_corners_3d[(i+2)%4,0]:
-                refined_corners_3d[i,0]=refined_corners_3d[(i+1)%4,0]+diff
-              
-              else:
-                refined_corners_3d[i,0]=refined_corners_3d[(i+1)%4,0]-diff
-            else:
-              if refined_corners_3d[(i+3)%4,0]>refined_corners_3d[(i+2)%4,0]:
-                refined_corners_3d[(i+1)%4,0]=refined_corners_3d[i,0]-diff
-              else:
-                refined_corners_3d[(i+1)%4,0]=refined_corners_3d[i,0]+diff
-    # print("--- 高精度X坐标精确化完成（增强KD-tree版本）---")
    
     return refined_corners_3d, search_geometries,edge_sample_geometries
 
@@ -1720,9 +1693,11 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     """
     # 输入验证
     if hatch_corners_refined is None or len(hatch_corners_refined) == 0:
+        logger.error("segment_coal_pile: 输入的船舱口顶点为空")
         return np.array([])
     
     if original_points.shape[1] < 4:
+        logger.error("segment_coal_pile: 输入的原始点云数据维度不足，至少需要4维（X,Y,Z,Intensity）")
         return np.array([])
     
     # 1. 计算船舱四个顶点的x坐标平均值
@@ -1782,6 +1757,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     
     # 4. 合并两部分点云
     if len(part_one) == 0 and len(processed_part_two) == 0:
+
         return np.array([])
     elif len(part_one) == 0:
         combined_points_for_clustering = processed_part_two
@@ -1792,6 +1768,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     
     # 5. 对合并后的点云进行DBSCAN聚类
     if len(combined_points_for_clustering) == 0:
+        logger.error("segment_coal_pile: 合并后的点云数据为空，无法进行聚类")
         return np.array([])
     
    # 对combined_points_for_clustering进行离群点滤波
@@ -1809,6 +1786,7 @@ def segment_coal_pile(original_points, hatch_corners_refined,visualize_hdbscan=F
     unique_labels_coal, counts_coal = np.unique(labels_coal_cluster[labels_coal_cluster != -1], return_counts=True)
     
     if len(unique_labels_coal) == 0:
+        logger.error("segment_coal_pile: 聚类结果为空，无法找到最大聚类")
         return np.array([])
     
     # 返回最大聚类的点
@@ -2043,97 +2021,6 @@ async def parse_point_cloud_data(data: bytes):
 
 
 
-# async def get_point_cloud_from_websocket_persistent():
-#     """
-#     从持久WebSocket连接获取点云数据并转换为numpy数组格式。
-#     """
-#     global ws_manager
-    
-#     if not ws_manager:
-#         print("WebSocket管理器未初始化")
-#         return None
-    
-#     # print("等待接收点云数据...")
-    
-#     while True:
-#         message = await ws_manager.receive_message()
-#         if message is None:
-#             print("接收消息失败")
-#             return None
-        
-#         # 检查是否为二进制数据
-#         if isinstance(message, bytes):
-#             # print(f"接收到二进制点云数据，长度: {len(message)} 字节")
-            
-#             try:
-#                 # 直接解析二进制点云数据
-#                 parsed_data = await parse_point_cloud_data(message)
-#                 if parsed_data and parsed_data['points']:
-#                     print(f"\n=== 成功获取点云数据 ===")
-#                     # print(f"点数: {len(parsed_data['points'])}")
-                    
-#                     # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
-#                     points_list = []
-#                     for point in parsed_data['points']:
-#                         points_list.append([
-#                             point['x'],
-#                             point['y'], 
-#                             point['z'],
-#                             point['refl']  # 使用反射强度作为Intensity
-#                         ])
-                    
-#                     points_array = np.array(points_list, dtype=np.float32)
-#                     # print(f"转换为numpy数组: {points_array.shape}")
-#                     return points_array, parsed_data['header']
-                    
-#             except Exception as e:
-#                 print(f"解析二进制数据失败: {e}")
-#                 continue
-                
-#         elif isinstance(message, str):
-#             # 保留对字符串消息的处理（用于兼容性）
-#             try:
-#                 json_data = json.loads(message)
-                
-#                 # 检查是否包含点云数据
-#                 if 'data$okio' in json_data and isinstance(json_data['data$okio'], str):
-#                     base64_data_str = json_data['data$okio']
-#                     print(f"接收到Base64编码的点云数据，长度: {len(base64_data_str)}")
-                    
-#                     try:
-#                         decoded_bytes = base64.b64decode(base64_data_str)
-#                         print(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
-                        
-#                         # 解析点云数据
-#                         parsed_data = await parse_point_cloud_data(decoded_bytes)
-#                         if parsed_data and parsed_data['points']:
-#                             print(f"\n=== 成功获取点云数据 ===")
-#                             print(f"点数: {len(parsed_data['points'])}")
-                            
-#                             # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
-#                             points_list = []
-#                             for point in parsed_data['points']:
-#                                 points_list.append([
-#                                     point['x'],
-#                                     point['y'], 
-#                                     point['z'],
-#                                     point['refl']  # 使用反射强度作为Intensity
-#                                 ])
-                            
-#                             points_array = np.array(points_list, dtype=np.float32)
-#                             print(f"转换为numpy数组: {points_array.shape}")
-#                             return points_array, parsed_data['header']
-                            
-#                     except base64.binascii.Error as e:
-#                         print(f"Base64解码失败: {e}")
-#                         continue
-                        
-#             except json.JSONDecodeError:
-#                 print("收到非JSON消息，跳过")
-#                 continue
-
-
-
 async def get_point_cloud_from_websocket_persistent():
     """
     从持久WebSocket连接获取点云数据并转换为numpy数组格式。
@@ -2147,38 +2034,22 @@ async def get_point_cloud_from_websocket_persistent():
     # print("等待接收点云数据...")
     
     while True:
-        # 开始计时：获取消息
-        receive_start_time = time.time()
         message = await ws_manager.receive_message()
-        receive_end_time = time.time()
-        receive_duration = receive_end_time - receive_start_time
-        
         if message is None:
             print("接收消息失败")
             return None
-        
-        logger.info(f"获取点云数据耗时: {receive_duration:.4f}秒")
         
         # 检查是否为二进制数据
         if isinstance(message, bytes):
             # print(f"接收到二进制点云数据，长度: {len(message)} 字节")
             
             try:
-                # 开始计时：解析数据
-                parse_start_time = time.time()
                 # 直接解析二进制点云数据
                 parsed_data = await parse_point_cloud_data(message)
-                parse_end_time = time.time()
-                parse_duration = parse_end_time - parse_start_time
-                
-                logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
-                
                 if parsed_data and parsed_data['points']:
                     print(f"\n=== 成功获取点云数据 ===")
                     # print(f"点数: {len(parsed_data['points'])}")
                     
-                    # 开始计时：转换为numpy数组
-                    convert_start_time = time.time()
                     # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
                     points_list = []
                     for point in parsed_data['points']:
@@ -2190,11 +2061,6 @@ async def get_point_cloud_from_websocket_persistent():
                         ])
                     
                     points_array = np.array(points_list, dtype=np.float32)
-                    convert_end_time = time.time()
-                    convert_duration = convert_end_time - convert_start_time
-                    
-                    logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
-                    logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
                     # print(f"转换为numpy数组: {points_array.shape}")
                     return points_array, parsed_data['header']
                     
@@ -2213,29 +2079,15 @@ async def get_point_cloud_from_websocket_persistent():
                     print(f"接收到Base64编码的点云数据，长度: {len(base64_data_str)}")
                     
                     try:
-                        # 开始计时：Base64解码
-                        decode_start_time = time.time()
                         decoded_bytes = base64.b64decode(base64_data_str)
-                        decode_end_time = time.time()
-                        decode_duration = decode_end_time - decode_start_time
+                        print(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
                         
-                        logger.info(f"Base64解码耗时: {decode_duration:.4f}秒")
-                        logger.info(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
-                        
-                        # 开始计时：解析点云数据
-                        parse_start_time = time.time()
+                        # 解析点云数据
                         parsed_data = await parse_point_cloud_data(decoded_bytes)
-                        parse_end_time = time.time()
-                        parse_duration = parse_end_time - parse_start_time
-                        
-                        logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
-                        
                         if parsed_data and parsed_data['points']:
                             print(f"\n=== 成功获取点云数据 ===")
                             print(f"点数: {len(parsed_data['points'])}")
                             
-                            # 开始计时：转换为numpy数组
-                            convert_start_time = time.time()
                             # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
                             points_list = []
                             for point in parsed_data['points']:
@@ -2247,12 +2099,7 @@ async def get_point_cloud_from_websocket_persistent():
                                 ])
                             
                             points_array = np.array(points_list, dtype=np.float32)
-                            convert_end_time = time.time()
-                            convert_duration = convert_end_time - convert_start_time
-                            
-                            logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
-                            logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
-                            # print(f"转换为numpy数组: {points_array.shape}")
+                            print(f"转换为numpy数组: {points_array.shape}")
                             return points_array, parsed_data['header']
                             
                     except base64.binascii.Error as e:
@@ -2262,6 +2109,138 @@ async def get_point_cloud_from_websocket_persistent():
             except json.JSONDecodeError:
                 print("收到非JSON消息，跳过")
                 continue
+
+
+
+#带有时间统计的获取点云数据函数
+# async def get_point_cloud_from_websocket_persistent():
+#     """
+#     从持久WebSocket连接获取点云数据并转换为numpy数组格式。
+#     """
+#     global ws_manager
+    
+#     if not ws_manager:
+#         print("WebSocket管理器未初始化")
+#         return None
+    
+#     # print("等待接收点云数据...")
+    
+#     while True:
+#         # 开始计时：获取消息
+#         receive_start_time = time.time()
+#         message = await ws_manager.receive_message()
+#         receive_end_time = time.time()
+#         receive_duration = receive_end_time - receive_start_time
+        
+#         if message is None:
+#             print("接收消息失败")
+#             return None
+        
+#         logger.info(f"获取点云数据耗时: {receive_duration:.4f}秒")
+        
+#         # 检查是否为二进制数据
+#         if isinstance(message, bytes):
+#             # print(f"接收到二进制点云数据，长度: {len(message)} 字节")
+            
+#             try:
+#                 # 开始计时：解析数据
+#                 parse_start_time = time.time()
+#                 # 直接解析二进制点云数据
+#                 parsed_data = await parse_point_cloud_data(message)
+#                 parse_end_time = time.time()
+#                 parse_duration = parse_end_time - parse_start_time
+                
+#                 logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
+                
+#                 if parsed_data and parsed_data['points']:
+#                     print(f"\n=== 成功获取点云数据 ===")
+#                     # print(f"点数: {len(parsed_data['points'])}")
+                    
+#                     # 开始计时：转换为numpy数组
+#                     convert_start_time = time.time()
+#                     # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
+#                     points_list = []
+#                     for point in parsed_data['points']:
+#                         points_list.append([
+#                             point['x'],
+#                             point['y'], 
+#                             point['z'],
+#                             point['refl']  # 使用反射强度作为Intensity
+#                         ])
+                    
+#                     points_array = np.array(points_list, dtype=np.float32)
+#                     convert_end_time = time.time()
+#                     convert_duration = convert_end_time - convert_start_time
+                    
+#                     logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
+#                     logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
+#                     # print(f"转换为numpy数组: {points_array.shape}")
+#                     return points_array, parsed_data['header']
+                    
+#             except Exception as e:
+#                 print(f"解析二进制数据失败: {e}")
+#                 continue
+                
+#         elif isinstance(message, str):
+#             # 保留对字符串消息的处理（用于兼容性）
+#             try:
+#                 json_data = json.loads(message)
+                
+#                 # 检查是否包含点云数据
+#                 if 'data$okio' in json_data and isinstance(json_data['data$okio'], str):
+#                     base64_data_str = json_data['data$okio']
+#                     print(f"接收到Base64编码的点云数据，长度: {len(base64_data_str)}")
+                    
+#                     try:
+#                         # 开始计时：Base64解码
+#                         decode_start_time = time.time()
+#                         decoded_bytes = base64.b64decode(base64_data_str)
+#                         decode_end_time = time.time()
+#                         decode_duration = decode_end_time - decode_start_time
+                        
+#                         logger.info(f"Base64解码耗时: {decode_duration:.4f}秒")
+#                         logger.info(f"Base64解码成功，得到 {len(decoded_bytes)} 字节原始数据。")
+                        
+#                         # 开始计时：解析点云数据
+#                         parse_start_time = time.time()
+#                         parsed_data = await parse_point_cloud_data(decoded_bytes)
+#                         parse_end_time = time.time()
+#                         parse_duration = parse_end_time - parse_start_time
+                        
+#                         logger.info(f"解析点云数据耗时: {parse_duration:.4f}秒")
+                        
+#                         if parsed_data and parsed_data['points']:
+#                             print(f"\n=== 成功获取点云数据 ===")
+#                             print(f"点数: {len(parsed_data['points'])}")
+                            
+#                             # 开始计时：转换为numpy数组
+#                             convert_start_time = time.time()
+#                             # 转换为numpy数组格式 (N, 4) - X, Y, Z, Intensity
+#                             points_list = []
+#                             for point in parsed_data['points']:
+#                                 points_list.append([
+#                                     point['x'],
+#                                     point['y'], 
+#                                     point['z'],
+#                                     point['refl']  # 使用反射强度作为Intensity
+#                                 ])
+                            
+#                             points_array = np.array(points_list, dtype=np.float32)
+#                             convert_end_time = time.time()
+#                             convert_duration = convert_end_time - convert_start_time
+                            
+#                             logger.info(f"转换为numpy数组耗时: {convert_duration:.4f}秒")
+#                             logger.info(f"总处理耗时: {(convert_end_time - receive_start_time):.4f}秒")
+#                             # print(f"转换为numpy数组: {points_array.shape}")
+#                             return points_array, parsed_data['header']
+                            
+#                     except base64.binascii.Error as e:
+#                         print(f"Base64解码失败: {e}")
+#                         continue
+                        
+#             except json.JSONDecodeError:
+#                 print("收到非JSON消息，跳过")
+#                 continue
 
 
 # 添加WebSocket服务器类
@@ -2769,7 +2748,7 @@ async def main():
                     original_points,
                     x_initial_threshold=10.0, 
                     x_stat_percentage=0.5,
-                    x_filter_offset=3,
+                    x_filter_offset=5,
                     intensity_threshold=10.0, #强度
                     x_upper_bound_adjustment=0.5,
                     visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
@@ -2826,7 +2805,7 @@ async def main():
                 
                 start_time_coal = time.time()
                 coal_pile_points = segment_coal_pile(original_points, hatch_corners_refined,visualize_clustered_pcd)
-                            #将所有煤堆点转换为真实的坐标系下的点
+                #将所有煤堆点转换为真实的坐标系下的点
                 world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
                 if len(world_coal_pile_points) > 0:
                     # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
@@ -2903,8 +2882,6 @@ async def main():
                 
                 #最大高度差
                 max_height_diff=hatch_depth-retain_height
-                #将所有煤堆点转换为真实的坐标系下的点
-                world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
                 #当前煤面的高度,即所有煤堆点的z坐标平均值
                 current_coal_height=world_coal_pile_points[:,2].mean()
                 #当前舱口高度
@@ -3223,8 +3200,9 @@ async def main():
                             plane_distance=plane_distance,
                             bevel_distance=bevel_distance,
                             logger=logger
-                                    )
-
+                                )
+                    if abs(capture_point2['x']-capture_point['x'])<0.5:
+                      capture_point2['x']=capture_point['x']
                 
                 
                 
