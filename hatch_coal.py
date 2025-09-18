@@ -1564,443 +1564,6 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
     return refined_corners_3d, search_geometries,edge_sample_geometries
 
 
-
-# def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity, points_for_yz_refinement, refined_corners_yz, visualize_ranges=True):
-#     """
-#     通过在矩形短边周围的特定区域搜寻原始点云，使用高精度方法来精确化矩形顶点的X坐标。
-    
-#     功能概述：
-#     1. 构建KD-tree索引以优化点云查询性能
-#     2. 计算矩形各边长度，识别短边（船舱的宽度方向）
-#     3. 在短边端点附近定义精细搜索区域
-#     4. 使用统计方法计算每个区域的最优X坐标
-#     5. 将计算结果分配给对应的矩形顶点
-    
-    
-#     参数:
-#         full_original_points_with_intensity: 完整的原始点云数据（包含强度信息）
-#         points_for_yz_refinement: 用于YZ平面精炼的点云数据
-#         refined_corners_yz: 已精炼的矩形角点YZ坐标
-#         visualize_ranges: 是否可视化搜索范围
-    
-#     返回:
-#         refined_corners_3d: 精炼后的3D矩形角点坐标
-#         search_geometries: 搜索区域的可视化几何体
-#         []: 空列表（保持接口兼容性）
-#     """
-  
-#     # print("\n--- 开始高精度X坐标精确化（增强KD-tree版本）---")
-    
-#     # ==================== 步骤1: 构建KD-tree索引 ====================
-#     # 构建2D KD-tree用于YZ平面的高效空间查询
-#     # KD-tree将O(n)的线性搜索优化为O(log n)的树搜索
-#     # print("构建2D KD-tree索引（YZ平面）...")
-#     points_yz = full_original_points_with_intensity[:, 1:3]  # 提取YZ坐标
-#     kdtree_yz = KDTree(points_yz)
-#     # print(f"2D KD-tree构建完成，包含 {len(points_yz)} 个点")
-
-#     # ==================== 步骤2: 计算边长度和存储边信息 ====================
-#     # 计算矩形四条边的长度，为后续短边识别做准备
-#     edge_lengths = []
-#     edges = []
-#     for i in range(4):
-#         p1 = refined_corners_yz[i]
-#         p2 = refined_corners_yz[(i + 1) % 4]  # 循环连接形成闭合矩形
-#         edge_length = np.linalg.norm(p2 - p1)  # 计算欧几里得距离
-#         edge_lengths.append(edge_length)
-#         edges.append((p1, p2))
-
-#     # print(f"矩形四条边长度: {[f'{l:.3f}' for l in edge_lengths]}")
-
-#     # ==================== 步骤3: 计算基准X坐标 ====================
-#     # 使用统计方法计算基准X坐标，避免极值点的影响
-#     # 选择中间20%的点（60%-80%分位数）来计算更稳定的基准值
-#     if len(points_for_yz_refinement) > 0:
-#         all_x_values = points_for_yz_refinement[:, 0]
-#         sorted_x_values = np.sort(all_x_values)
-        
-#         total_points = len(sorted_x_values)
-#         start_idx = int(total_points * 0.6)  # 60%分位数
-#         end_idx = int(total_points * 0.8)    # 80%分位数
-        
-#         if start_idx < end_idx:
-#             # 使用中间20%的点计算基准值，排除极值影响
-#             middle_x_values = sorted_x_values[start_idx:end_idx]
-#             avg_x_baseline = np.mean(middle_x_values)
-#             # print(f"使用过滤后点云中X坐标中间20%的点计算基准x: {avg_x_baseline:.3f} 米")
-#         else:
-#             # 点数太少时使用全部点
-#             avg_x_baseline = np.mean(all_x_values)
-#             # print(f"使用所有过滤后点计算基准x: {avg_x_baseline:.3f} 米")
-#     else:
-#         avg_x_baseline = 25
-#         # print("警告: 没有可用的过滤后点来计算基准x，使用默认值 25")
-
-#     # ==================== 步骤4: 对每条边进行X坐标采样 ====================
-#     # 使用KD-tree优化的边缘采样，为短边识别提供数据支持
-#     edge_x_averages = []
-    
-#     # 搜索参数定义
-#     inward_search_distance = 0.5   # 向矩形内部的搜索距离（米）
-#     outward_search_distance = 1.5  # 向矩形外部的搜索距离（米）
-#     x_sample_range = 5             # X坐标采样范围（米）
-#     edge_sample_geometries = []
-#     for i, (p1, p2) in enumerate(edges):
-#         # 计算边的方向向量和垂直向量
-#         edge_vec = p2 - p1
-#         edge_length = np.linalg.norm(edge_vec)
-#         if edge_length < 1e-6:  # 处理退化边的情况
-#             edge_x_averages.append(avg_x_baseline)
-#             logger.debug(f"边 {i}: 长度接近零，使用全局平均值: {avg_x_baseline:.3f}")
-#             continue
-
-#         edge_unit = edge_vec / edge_length  # 边的单位方向向量
-#         perp_vec = np.array([-edge_unit[1], edge_unit[0]])  # 垂直向量（逆时针90度）
-        
-#         # 确定垂直向量指向矩形外部
-#         rect_center = np.mean(refined_corners_yz, axis=0)
-#         edge_center = (p1 + p2) / 2
-#         to_center = rect_center - edge_center
-#         if np.dot(perp_vec, to_center) > 0:
-#             perp_vec = -perp_vec  # 翻转方向使其指向外部
-
-#         # 使用KD-tree进行高效的范围查询
-#         search_radius = max(outward_search_distance + inward_search_distance, edge_length / 2)
-#         candidate_indices = kdtree_yz.query_radius([edge_center], r=search_radius)[0]
-        
-#         # 对候选点进行精确的几何筛选
-#         edge_sample_points = []
-#         for idx in candidate_indices:
-#             point = full_original_points_with_intensity[idx]
-#             point_yz = point[1:3]
-#             point_x = point[0]
-
-#             # 计算点到边起点的投影
-#             to_point = point_yz - p1
-#             proj_along_edge = np.dot(to_point, edge_unit)    # 沿边方向的投影
-#             proj_perp_edge = np.dot(to_point, perp_vec)     # 垂直边方向的投影
-
-#             # 多重条件筛选：边界内 + 搜索带内 + X坐标范围内
-#             if (0 <= proj_along_edge <= edge_length and
-#                 -inward_search_distance <= proj_perp_edge <= outward_search_distance and
-#                 avg_x_baseline - x_sample_range <= point_x <= avg_x_baseline + x_sample_range):
-#                 edge_sample_points.append(point_x)
-
-#         # 创建边采样范围的可视化几何体
-#         if visualize_ranges:
-#             # 创建边采样区域的长方体
-#             box_x_dim = x_sample_range * 2
-#             box_y_dim = edge_length
-#             box_z_dim = outward_search_distance + inward_search_distance
-            
-#             edge_box = o3d.geometry.TriangleMesh.create_box(
-#                 width=box_x_dim,
-#                 height=box_y_dim, 
-#                 depth=box_z_dim
-#             )
-            
-#             # 移动到原点
-#             edge_box.translate([-box_x_dim/2, -box_y_dim/2, -box_z_dim/2])
-            
-#             # 创建旋转矩阵，使长方体沿着边的方向
-#             R = np.identity(3)
-#             # Y轴沿着边的方向
-#             R[1, 1] = edge_unit[0]  # edge_unit的Y分量
-#             R[2, 1] = edge_unit[1]  # edge_unit的Z分量
-#             # Z轴沿着垂直方向
-#             R[1, 2] = perp_vec[0]   # perp_vec的Y分量
-#             R[2, 2] = perp_vec[1]   # perp_vec的Z分量
-            
-#             edge_box.rotate(R, center=(0,0,0))
-            
-#             # 移动到边的中心位置
-#             box_yz_center = edge_center + perp_vec * (-inward_search_distance+outward_search_distance) / 2
-#             final_box_center_3d = np.array([avg_x_baseline, box_yz_center[0], box_yz_center[1]])
-            
-#             edge_box.translate(final_box_center_3d)
-            
-#             # 为不同的边设置不同的颜色
-#             colors = [[1.0, 0.0, 0.0],  # 红色
-#                      [0.0, 1.0, 0.0],  # 绿色
-#                      [0.0, 0.0, 1.0],  # 蓝色
-#                      [1.0, 1.0, 0.0]]  # 黄色
-#             edge_box.paint_uniform_color(colors[i])
-#             edge_sample_geometries.append(edge_box)
-            
-#             # 创建边的中心线
-#             line_start_3d = np.array([avg_x_baseline, p1[0], p1[1]])
-#             line_end_3d = np.array([avg_x_baseline, p2[0], p2[1]])
-            
-#             line_points = [line_start_3d, line_end_3d]
-#             line_indices = [[0, 1]]
-#             line_set = o3d.geometry.LineSet(
-#                 points=o3d.utility.Vector3dVector(line_points),
-#                 lines=o3d.utility.Vector2iVector(line_indices)
-#             )
-#             line_set.paint_uniform_color(colors[i])
-#             edge_sample_geometries.append(line_set)
-#         # 统计采样结果并计算边的X坐标平均值
-#         if edge_sample_points:
-#             sorted_points = np.sort(edge_sample_points)
-#             if len(sorted_points) >= 100:
-#                 # 优先使用最小的50个点（更接近船舱边缘）
-#                 selected_points = sorted_points[:50]
-#                 edge_x_avg = np.mean(selected_points)
-#                 # print(f"边 {i}: KD-tree查询到 {len(candidate_indices)} 个候选点，采样到 {len(edge_sample_points)} 个点，使用最小50个点平均x坐标: {edge_x_avg:.3f}")
-#             else:
-#                 # 点数不足时使用全部点
-#                 edge_x_avg = np.mean(sorted_points)
-
-#         else:
-
-#             edge_x_avg = 999
-#         edge_x_averages.append(edge_x_avg)
-
-#     # ==================== 步骤5: 识别短边 ====================
-#     # X坐标值较大，舱盖就不在这条边上
-#     sorted_indices = np.argsort(edge_x_averages)[::-1]  # 按X坐标降序排列
-#     short_edge_indices = sorted_indices[:2]  # 选择X坐标最大的两条边
-
-#     # 验证选择的边是否为相对边（矩形的对边）
-#     valid_combinations = [{0, 2}, {1, 3}]  # 有效的对边组合
-#     selected_set = set(short_edge_indices)
-
-#     if selected_set not in valid_combinations:
-#         # 如果不是对边，排除最小x坐标边及其对边，选择另一对边
-#         min_x_edge = sorted_indices[-1]  # x坐标最小的边
-#         min_x_opposite_edge = (min_x_edge + 2) % 4  # 最小x坐标边的对边
-#         excluded_edges = {min_x_edge, min_x_opposite_edge}
-        
-#         # 选择剩余的另一对相对边
-#         all_edges = {0, 1, 2, 3}
-#         remaining_edges = all_edges - excluded_edges
-#         short_edge_indices = np.array(list(remaining_edges))
-#         # print(f"选出的边不是相对边，排除最小x坐标边 {min_x_edge} 及其对边 {min_x_opposite_edge}，选择另一对边: {short_edge_indices}")
-
-#     # print(f"各边x坐标平均值: {[f'{avg:.3f}' for avg in edge_x_averages]}")
-#     # print(f"最终选择的短边索引: {short_edge_indices}")
-
-#     # ==================== 步骤6: 定义精细搜索区域 ====================
-#     # 只对短边在中间范围内创建搜索区域，用于高精度X坐标计算
-    
-#     # 搜索区域参数
-#     shorten_dist = 2        # 边缩短距离（米），避免角点处的噪声和角点处没有点的情况
-#     z_expand_min = -0.4       # Z方向向内扩展距离（米）
-#     z_expand_max = 0.8        # Z方向向外扩展距离（米）
-#     x_search_range = 5        # X方向搜索范围（米）
-
-#     search_regions = []       # 存储搜索区域信息
-#     search_geometries = []    # 存储可视化几何体
-#     edge_x_mapping = {}       # 存储每条边对应的X坐标值
-
-#     # 只对短边进行中间范围搜索
-#     for edge_idx in short_edge_indices:
-#         p1, p2 = edges[edge_idx]
-#         edge_vec = p2 - p1
-#         edge_length = np.linalg.norm(edge_vec)
-#         if edge_length < 1e-6:
-#             continue
-#         edge_unit = edge_vec / edge_length
-
-#         # 缩短边以避免角点噪声影响
-#         if edge_length > 2 * shorten_dist:
-#             # 边足够长时，从两端各缩短指定距离
-#             shortened_p1 = p1 + shorten_dist * edge_unit
-#             shortened_p2 = p2 - shorten_dist * edge_unit
-#         else:
-#             # 边较短时，在中点附近创建小范围
-#             mid_point = (p1 + p2) / 2
-#             half_range = edge_length / 4
-#             shortened_p1 = mid_point - half_range * edge_unit
-#             shortened_p2 = mid_point + half_range * edge_unit
-
-#         # print(f"短边 {edge_idx}: 原始长度 {edge_length:.3f}m, 缩短后长度 {np.linalg.norm(shortened_p2 - shortened_p1):.3f}m")
-
-#         # 计算垂直方向（指向矩形外部）
-#         perp_vec = np.array([-edge_unit[1], edge_unit[0]])
-#         rect_center = np.mean(refined_corners_yz, axis=0)
-#         edge_center = (p1 + p2) / 2
-#         to_center = rect_center - edge_center
-#         if np.dot(perp_vec, to_center) > 0:
-#             perp_vec = -perp_vec
-
-#         # 在缩短边的中间范围创建搜索区域（而不是在端点）
-#         shortened_edge_length = np.linalg.norm(shortened_p2 - shortened_p1)
-#         shortened_edge_center = (shortened_p1 + shortened_p2) / 2
-        
-#         # 创建单个搜索区域覆盖整个缩短边的中间范围
-#         region_info = {
-#             'center_yz': shortened_edge_center,
-#             'edge_idx': edge_idx,
-#             'edge_start': shortened_p1,
-#             'edge_end': shortened_p2,
-#             'edge_length': shortened_edge_length,
-#             'perp_direction': perp_vec,
-#             'edge_direction': edge_unit,
-#             'points': []
-#         }
-
-#         # 使用KD-tree进行高效的区域查询
-#         search_radius =  shortened_edge_length / 2
-#         candidate_indices = kdtree_yz.query_radius([shortened_edge_center], r=search_radius)[0]
-    
-#         # 对候选点进行精确的几何筛选
-#         for idx in candidate_indices:
-#             point = full_original_points_with_intensity[idx]
-#             point_yz = point[1:3]
-#             point_x = point[0]
-
-#             # 计算点相对于搜索区域中心的投影
-#             to_point = point_yz - shortened_edge_center
-#             proj_along_edge = np.dot(to_point, edge_unit)   # 沿边方向投影
-#             proj_perp_edge = np.dot(to_point, perp_vec)    # 垂直方向投影
-
-#             # 筛选条件：在搜索矩形内 + X坐标范围内 + 在缩短边的范围内
-#             if (abs(proj_along_edge) <= shortened_edge_length / 2 and
-#                 z_expand_min <= proj_perp_edge <= z_expand_max):
-#                 if abs(point_x - avg_x_baseline) <= x_search_range:
-#                     region_info['points'].append(point)
-
-#         search_regions.append(region_info)
-#         # print(f"短边 {edge_idx} 搜索区域: KD-tree查询到 {len(candidate_indices)} 个候选点，筛选后得到 {len(region_info['points'])} 个有效点")
-
-#         # ==================== 可视化搜索范围 ====================
-#         # 创建3D可视化几何体以便调试和验证
-#         if visualize_ranges:
-#             # 创建搜索区域的3D包围盒
-#             box_x_dim = x_search_range * 2
-#             box_y_dim = shortened_edge_length  # 使用缩短边的长度作为Y方向尺寸
-#             box_z_dim = (z_expand_max - z_expand_min)
-
-#             box = o3d.geometry.TriangleMesh.create_box(
-#                 width=box_x_dim,
-#                 height=box_y_dim,
-#                 depth=box_z_dim
-#             )
-
-#             # 将盒子中心移到原点
-#             box.translate([-box_x_dim/2, -box_y_dim/2, -box_z_dim/2])
-
-#             # 创建旋转矩阵以对齐搜索方向
-#             R = np.identity(3)
-#             R[1, 1] = edge_unit[0]  # Y轴对齐边方向
-#             R[2, 1] = edge_unit[1]
-#             R[1, 2] = perp_vec[0]   # Z轴对齐垂直方向
-#             R[2, 2] = perp_vec[1]
-
-#             box.rotate(R, center=(0,0,0))
-
-#             # 移动到最终位置
-#             box_yz_center = shortened_edge_center + perp_vec * (z_expand_min + z_expand_max) / 2
-#             final_box_center_3d = np.array([avg_x_baseline, box_yz_center[0], box_yz_center[1]])
-
-#             box.translate(final_box_center_3d)
-#             box.paint_uniform_color([0.0, 0.8, 0.8])  # 青色
-#             search_geometries.append(box)
-
-#             # 创建搜索方向指示箭头
-#             arrow_start_yz = shortened_edge_center + perp_vec * z_expand_min
-#             arrow_end_yz = shortened_edge_center + perp_vec * z_expand_max
-
-#             arrow_start_3d = np.array([avg_x_baseline, arrow_start_yz[0], arrow_start_yz[1]])
-#             arrow_end_3d = np.array([avg_x_baseline, arrow_end_yz[0], arrow_end_yz[1]])
-
-#             line_points = [arrow_start_3d, arrow_end_3d]
-#             line_indices = [[0, 1]]
-#             line_set = o3d.geometry.LineSet(
-#                 points=o3d.utility.Vector3dVector(line_points),
-#                 lines=o3d.utility.Vector2iVector(line_indices)
-#             )
-#             line_set.paint_uniform_color([1.0, 0.0, 0.0])  # 红色
-#             search_geometries.append(line_set)
-
-#             # 添加边界线可视化，显示缩短边的范围
-#             edge_line_points = [
-#                 np.array([avg_x_baseline, shortened_p1[0], shortened_p1[1]]),
-#                 np.array([avg_x_baseline, shortened_p2[0], shortened_p2[1]])
-#             ]
-#             edge_line_indices = [[0, 1]]
-#             edge_line_set = o3d.geometry.LineSet(
-#                 points=o3d.utility.Vector3dVector(edge_line_points),
-#                 lines=o3d.utility.Vector2iVector(edge_line_indices)
-#             )
-#             edge_line_set.paint_uniform_color([0.0, 1.0, 0.0])  # 绿色
-#             search_geometries.append(edge_line_set)
-
-#     # print(f"创建了 {len(search_regions)} 个短边搜寻区域")
-
-#     # ==================== 步骤7: 计算短边区域X坐标统计值 ====================
-#     # 使用改进的统计策略计算每个短边搜索区域的最优X坐标
-#     for i, region in enumerate(search_regions):
-#         points_in_region = np.array(region['points'])
-#         edge_idx = region['edge_idx']
-        
-#         if len(points_in_region) > 20:
-#             # 点数充足时使用统计筛选策略
-#             x_coords = points_in_region[:, 0]
-#             sorted_x = np.sort(x_coords)
-
-#             if len(sorted_x) > 8:
-#                 # 去除最小的8个点（可能的噪声点）
-#                 filtered_x = sorted_x[8:]
-#                 if len(filtered_x) >= 7:
-#                     # 使用接下来最小的7个点计算平均值
-#                     selected_x = filtered_x[:7]
-#                     avg_x = np.mean(selected_x)
-#                     edge_x_mapping[edge_idx] = avg_x
-#                     # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，筛选后取最小7点平均x坐标: {avg_x:.3f}")
-#                 else:
-#                     # 筛选后点数不足时使用全部筛选点
-#                     avg_x = np.mean(filtered_x)
-#                     edge_x_mapping[edge_idx] = avg_x
-#                     # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，使用 {len(filtered_x)} 个点平均x坐标: {avg_x:.3f}")
-#             else:
-#                 # 总点数不足时使用全部点
-#                 avg_x = np.mean(sorted_x)
-#                 edge_x_mapping[edge_idx] = avg_x
-#                 # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，使用所有点平均X坐标: {avg_x:.3f}")
-#         elif len(points_in_region) > 0:
-#             # 点数较少时的处理策略
-#             avg_x = np.mean(points_in_region[:, 0])
-#             edge_x_mapping[edge_idx] = avg_x
-
-#         else:
-
-#             pass
-
-#     # ==================== 步骤8: X坐标分配给矩形顶点 ====================
-#     # 将计算出的X坐标分配给对应的矩形角点，完成3D重建
-#     refined_corners_3d = np.zeros((4, 3))
-    
-#     for vertex_idx in range(4):
-#         vertex_yz = refined_corners_yz[vertex_idx]
-        
-#         # 确定与该顶点相关的边
-#         # 顶点i连接到边i和边(i-1)%4
-#         connected_edges = [vertex_idx, (vertex_idx - 1) % 4]
-        
-#         # 寻找与该顶点相关的边中有有效X坐标的短边
-#         assigned_x = None
-#         for edge_idx in connected_edges:
-#             if edge_idx in edge_x_mapping:
-#                 assigned_x = edge_x_mapping[edge_idx]
-#                 # print(f"顶点 {vertex_idx}: 使用短边 {edge_idx} 的X坐标: {assigned_x:.3f}")
-#                 break
-        
-#         if assigned_x is None:
-#             # 如果相关的边都不是短边或没有有效的X坐标，使用全局基准X坐标
-#             assigned_x = avg_x_baseline
-#             # print(f"顶点 {vertex_idx}: 相关边无短边坐标，使用全局平均X坐标: {assigned_x:.3f}")
-        
-#         refined_corners_3d[vertex_idx] = [assigned_x, vertex_yz[0], vertex_yz[1]]
-
-
-   
-#     return refined_corners_3d, search_geometries,edge_sample_geometries
-
-
-
-
 # --- 最终3D结果可视化函数 ---
 def visualize_final_result_with_search_ranges(original_points, hatch_corners, search_geometries=None, edge_sample_geometries=None):
     """
@@ -3619,7 +3182,6 @@ async def main():
                         bevel_distance=bevel_distance,
                         logger=logger
                     )
-                    capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
                     capture_point_effective=1
                     # 计算第二个抓取点，排除第一个抓取点的区域
                     capture_point2, capture_point2_layer = calculate_capture_point(
@@ -3642,13 +3204,11 @@ async def main():
                         bevel_distance=bevel_distance,
                         logger=logger
                     )
-                    capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
 
                 else:
                     capture_point={'x':last_capture_point_x,'y':last_capture_point_y,'z':last_capture_point_z}
                     capture_point_layer=0
                     capture_point_effective=0
-                    capture_point_layer_min_height=0
                     capture_point2,capture_point2_layer=calculate_capture_point(
                             world_coal_pile_points=world_coal_pile_points,
                             lines_dict=lines_dict,
@@ -3669,9 +3229,8 @@ async def main():
                             bevel_distance=bevel_distance,
                             logger=logger
                                 )
-                    capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
                     if abs(capture_point2['x']-capture_point['x'])<0.5:
-                      logger.info(f'使用上次的抓取点的x坐标{capture_point["x"]}')
+                      logger.info('使用上次的抓取点的x坐标')
                       capture_point2['x']=capture_point['x']
                         
                 
@@ -3681,91 +3240,16 @@ async def main():
                 
                 
                 
-                # #计算本线所处的那一层的最低点
-                # current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
-                
-                end_time_grab=time.time()
-                logger.info(f"计算时间为：{end_time_grab-start_time_grab}")                
-                
-
-
+                #计算本线所处的那一层的最低点
+                current_line_layer_min_height=hatch_height-(current_line_layer*floor_height)
                 
                 
+                #将抓取点的坐标发送到服务器
                 
-
-                
-            except Exception as e:
-                # 记录异常但不退出循环
-                
-
-                
-                if "换线失败" in str(e):
-                    logger.error(f"换线失败，已经尝试过所有的线，作业结束")
-                    #发给java后台的数据,，type=4 表示作业结束，没有可以作业的线
-                    to_java_data={
-                        'type':4,
-                        'timestamp': 0,
-                        'points_lidar': [],
-                        'points_world': [],
-                        'current_machine_position': 0,
-                        'capture_point': {'x': 0, 'y': 0, 'z': 0},
-                        'capture_point2': {'x': 0, 'y': 0, 'z': 0},
-                        'capture_point_effective': 0,
-                        'current_line_layer': 0,
-                        'capture_point_layer': 0,
-                        'capture_point2_layer': 0,
-                        'capture_point_layer_min_height': 0.0,
-                        'capture_point2_layer_min_height': 0.0,
-                        'current_hatch': 0,
-                        'current_unLoadShip': 0
-                    }
-               
-                    #发送给我连接的java服务器
-                    json_message = json.dumps(to_java_data, ensure_ascii=False)
-
-                    await ws_manager.send_message(json_message)
-                    print(f"发送给java后台的数据:{to_java_data}")
-                
-                else:
-                    logger.error(f"单次处理循环出错: {e}", exc_info=True)
-                    if "websocket" in str(e).lower() or "connection" in str(e).lower():
-                        logger.error(f"与java后台的连接已断开，错误信息: {e}",exc_info=True)
-                        ws_manager.is_connected = False
-                    
-                    #发给java后台的数据,，type=3 表示计算失败
-                    to_java_data={
-                        'type':3,
-                        'timestamp': 0,
-                        'points_lidar': [],
-                        'points_world': [],
-                        'current_machine_position': 0,
-                        'capture_point': {'x': 0, 'y': 0, 'z': 0},
-                        'capture_point2': {'x': 0, 'y': 0, 'z': 0},
-                        'capture_point_effective': 0,
-                        'current_line_layer': 0,
-                        'capture_point_layer': 0,
-                        'capture_point2_layer': 0,
-                        'capture_point_layer_min_height': 0.0,
-                        'capture_point2_layer_min_height': 0.0,
-                        'current_hatch': 0,
-                        'current_unLoadShip': 0
-                    }
-               
-                    #发送给我连接的java服务器
-                    json_message = json.dumps(to_java_data, ensure_ascii=False)
-                    await ws_manager.send_message(json_message)
-                    print(f"发送给java后台的数据:{to_java_data}")
-
-                await asyncio.sleep(0.5)  # 等待0.5秒后继续下一次循环
-                continue  # 继续下一次while循环
-                
-            #try块执行成功后，执行else块
-            else:
-
                 coal_pile_data["capture_point"] = capture_point
                 coal_pile_data["capture_point_layer"]=capture_point_layer
                 coal_pile_data["current_line_layer"]=current_line_layer
-                coal_pile_data["capture_point_layer_min_height"]=float(capture_point_layer_min_height)
+                coal_pile_data["min_height"]=float(current_line_layer_min_height)
                 
                 
                 
@@ -3782,19 +3266,33 @@ async def main():
                     'current_line_layer': int(current_line_layer),
                     'capture_point_layer': int(capture_point_layer),
                     'capture_point2_layer':int(capture_point2_layer),
-                    'capture_point_layer_min_height': float(capture_point_layer_min_height),
-                    'capture_point2_layer_min_height':float(capture_point2_layer_min_height),
+                    'min_height': float(current_line_layer_min_height),
                     'current_hatch': int(current_hatch),
                     'current_unLoadShip':3
                 }
-               
-                #发送给我连接的java服务器
-                json_message = json.dumps(to_java_data, ensure_ascii=False)
-
-                await ws_manager.send_message(json_message)
-                print(f"发送给java后台的数据:{to_java_data}")
-                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
                 print(f"煤堆数据已广播到所有连接的客户端")
+                #发送给我连接的服务器
+                json_message = json.dumps(to_java_data, ensure_ascii=False)
+                await ws_manager.send_message(json_message)
+                await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+                print(f"发送给java后台的数据:{to_java_data}")
+                
+                
+                end_time_grab=time.time()
+                logger.info(f"计算时间为：{end_time_grab-start_time_grab}")
+                
+            except Exception as e:
+                # 记录异常但不退出循环
+                logger.error(f"单次处理循环出错: {e}", exc_info=True)
+                if "websocket" in str(e).lower() or "connection" in str(e).lower():
+                    ws_manager.is_connected = False
+                
+                if "换线失败" in str(e):
+                    logger.error(f"换线失败，已经尝试过所有的线，作业结束")
+
+                await asyncio.sleep(0.5)  # 等待0.5秒后继续下一次循环
+                continue  # 继续下一次while循环
+                
 
 
 
