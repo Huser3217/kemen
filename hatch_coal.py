@@ -2905,7 +2905,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           exclude_x_center, exclude_y_center, exclude_radius,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
-                          plane_threshold, plane_distance, bevel_distance, logger):
+                          plane_threshold, plane_distance, bevel_distance, Sign, k, b, logger):
     """
     计算抓取点的核心函数
     
@@ -2927,6 +2927,9 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         plane_threshold: 平面阈值
         plane_distance: 平面距离
         bevel_distance: 斜面距离
+        Sign: 是否使用线性函数
+        k: 线性函数的斜率
+        b: 线性函数的截距
         logger: 日志记录器
         
     Returns:
@@ -3082,11 +3085,17 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     if height_var < plane_threshold:
         # 如果小于阈值，就认为这些块是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
-        avg_height = best_avg_height + plane_distance
+        if Sign:
+            avg_height = best_avg_height + k*height_var+b
+        else:
+            avg_height = best_avg_height + plane_distance
     else:
         # 如果大于阈值，就认为这些块不是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
-        avg_height = best_avg_height + bevel_distance
+        if Sign:
+            avg_height = best_avg_height + k*height_var+b
+        else:
+            avg_height = best_avg_height + bevel_distance
 
     # 计算抓取点处于哪一层
     capture_point_layer = math.ceil(abs(hatch_height - avg_height) / floor_height)
@@ -3368,6 +3377,10 @@ async def main():
                 plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
                 bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
                 retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
+                Sign=config.GrabPointCalculationConfig.Sign  #使用线性函数
+                k=config.GrabPointCalculationConfig.k  #线性函数的斜率
+                b=config.GrabPointCalculationConfig.b  #线性函数的截距
+
                 
                 #最大高度差
                 max_height_diff=hatch_depth-retain_height
@@ -3641,6 +3654,9 @@ async def main():
                         plane_threshold=plane_threshold,
                         plane_distance=plane_distance,
                         bevel_distance=bevel_distance,
+                        Sign=Sign,
+                        k=k,
+                        b=b,
                         logger=logger
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
@@ -3664,6 +3680,9 @@ async def main():
                         plane_threshold=plane_threshold,
                         plane_distance=plane_distance,
                         bevel_distance=bevel_distance,
+                        Sign=Sign,
+                        k=k,
+                        b=b,
                         logger=logger
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
@@ -3691,6 +3710,9 @@ async def main():
                             plane_threshold=plane_threshold,
                             plane_distance=plane_distance,
                             bevel_distance=bevel_distance,
+                            Sign=Sign,
+                            k=k,
+                            b=b,
                             logger=logger
                                 )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
