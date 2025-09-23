@@ -33,7 +33,7 @@ import sys
 import subprocess
 
 # from config import GrabPointCalculationConfig
-import config
+# import config
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -2290,7 +2290,7 @@ URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 计算信号(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
-HEADER_FORMAT = "<4s HHHHIIdd II QQ II 3d 12d 12d"
+HEADER_FORMAT = "<4s HHHHIIdd II QQ II 3d 12d 12d 15d I 6d"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -2414,7 +2414,10 @@ async def parse_point_cloud_data(data: bytes):
                 world_corner1_x, world_corner1_y, world_corner1_z,
                 world_corner2_x, world_corner2_y, world_corner2_z,
                 world_corner3_x, world_corner3_y, world_corner3_z,
-                world_corner4_x, world_corner4_y, world_corner4_z
+                world_corner4_x, world_corner4_y, world_corner4_z,
+                lineWidth,floorHeight,safeDistanceXNegativeInit,safeDistanceXPositiveInit,safeDistanceY0ceanInit,safeDistanceYLandInit,
+                hatchDepth,retainHeight,lineGap,expansionXFront,expansionYFront,expansionXBack,expansionYBack,
+                planeThreshold,heightDiff,signFlag,kValue,bValue,planeDistance,bevelDistance,blockWidth,blockLength
             ) = header_data
     except struct.error as e:
         print(f"解析头部失败: {e}")
@@ -2446,6 +2449,30 @@ async def parse_point_cloud_data(data: bytes):
     print(f"  World Corner2: ({world_corner2_x:.3f}, {world_corner2_y:.3f}, {world_corner2_z:.3f})")
     print(f"  World Corner3: ({world_corner3_x:.3f}, {world_corner3_y:.3f}, {world_corner3_z:.3f})")
     print(f"  World Corner4: ({world_corner4_x:.3f}, {world_corner4_y:.3f}, {world_corner4_z:.3f})")
+
+    print(f"  lineWidth: {lineWidth}")
+    print(f"  floorHeight: {floorHeight}")
+    print(f"  safeDistanceXNegativeInit: {safeDistanceXNegativeInit}")
+    print(f"  safeDistanceXPositiveInit: {safeDistanceXPositiveInit}")
+    print(f"  safeDistanceY0ceanInit: {safeDistanceY0ceanInit}")
+    print(f"  safeDistanceYLandInit: {safeDistanceYLandInit}")
+    print(f"  hatchDepth: {hatchDepth}")
+    print(f"  retainHeight: {retainHeight}")
+    print(f"  lineGap: {lineGap}")
+    print(f"  expansionXFront: {expansionXFront}")
+    print(f"  expansionYFront: {expansionYFront}")
+    print(f"  expansionXBack: {expansionXBack}")
+    print(f"  expansionYBack: {expansionYBack}")
+    print(f"  planeThreshold: {planeThreshold}")
+    print(f"  heightDiff: {heightDiff}")
+    print(f"  signFlag: {signFlag}")
+    print(f"  kValue: {kValue}")
+    print(f"  bValue: {bValue}")
+    print(f"  planeDistance: {planeDistance}")
+    print(f"  bevelDistance: {bevelDistance}")
+    print(f"  blockWidth: {blockWidth}")
+    print(f"  blockLength: {blockLength}")
+
     print("------------------")
 
     # 2. 解析点数据
@@ -2499,9 +2526,33 @@ async def parse_point_cloud_data(data: bytes):
             'corner3': {'x': world_corner3_x, 'y': world_corner3_y, 'z': world_corner3_z},
             'corner4': {'x': world_corner4_x, 'y': world_corner4_y, 'z': world_corner4_z}
         },
+
+        'lineWidth': lineWidth,
+        'floorHeight': floorHeight,
+        'safeDistanceXNegativeInit': safeDistanceXNegativeInit,
+        'safeDistanceXPositiveInit': safeDistanceXPositiveInit,
+        'safeDistanceY0ceanInit': safeDistanceY0ceanInit,
+        'safeDistanceYLandInit': safeDistanceYLandInit,
+        'hatchDepth': hatchDepth,
+        'retainHeight': retainHeight,
+        'lineGap': lineGap,
+        'expansionXFront': expansionXFront,
+        'expansionYFront': expansionYFront,
+        'expansionXBack': expansionXBack,
+        'expansionYBack': expansionYBack,
+        'planeThreshold': planeThreshold,
+        'heightDiff': heightDiff,
+        'signFlag': signFlag,
+        'kValue': kValue,
+        'bValue': bValue,
+        'planeDistance': planeDistance,
+        'bevelDistance': bevelDistance,
+        'blockWidth': blockWidth,
+        'blockLength': blockLength,
+        
         },
-      
         'points': points
+        
     }
 
 
@@ -3087,14 +3138,14 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     if height_var < plane_threshold:
         # 如果小于阈值，就认为这些块是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
-        if Sign:
+        if Sign==1:
             avg_height = best_avg_height + k*height_var+b
         else:
             avg_height = best_avg_height + plane_distance
     else:
         # 如果大于阈值，就认为这些块不是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
-        if Sign:
+        if Sign==1:
             avg_height = best_avg_height + k*height_var+b
         else:
             avg_height = best_avg_height + bevel_distance
@@ -3202,7 +3253,7 @@ async def main():
                     await asyncio.sleep(0.5)  # 等待0.5秒后重试
                     continue
 
-                importlib.reload(config)
+                # importlib.reload(config)
                 # print(config.GrabPointCalculationConfig.hatch_depth)
                 
                 current_hatch = header_info.get('current_hatch', 0)
@@ -3390,28 +3441,53 @@ async def main():
                 
                 
                 start_time_grab=time.time()
-                line_width=config.GrabPointCalculationConfig.line_width  #线宽
-                floor_height=config.GrabPointCalculationConfig.floor_height  #层高
-                safe_distance_x_negative_init=config.GrabPointCalculationConfig.safe_distance_x_negative_init  #大车左侧安全距离
-                safe_distance_x_positive_init=config.GrabPointCalculationConfig.safe_distance_x_positive_init  #大车右侧安全距离
-                safe_distance_y_ocean_init=config.GrabPointCalculationConfig.safe_distance_y_ocean_init  #海侧安全距离
-                safe_distance_y_land_init=config.GrabPointCalculationConfig.safe_distance_y_land_init  #陆侧安全距离
-                hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
-                line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
-                expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
-                expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
+                # line_width=config.GrabPointCalculationConfig.line_width  #线宽
+                # floor_height=config.GrabPointCalculationConfig.floor_height  #层高
+                # safe_distance_x_negative_init=config.GrabPointCalculationConfig.safe_distance_x_negative_init  #大车左侧安全距离
+                # safe_distance_x_positive_init=config.GrabPointCalculationConfig.safe_distance_x_positive_init  #大车右侧安全距离
+                # safe_distance_y_ocean_init=config.GrabPointCalculationConfig.safe_distance_y_ocean_init  #海侧安全距离
+                # safe_distance_y_land_init=config.GrabPointCalculationConfig.safe_distance_y_land_init  #陆侧安全距离
+                # hatch_depth=config.GrabPointCalculationConfig.hatch_depth  # 型深
+                # line_gap=config.GrabPointCalculationConfig.line_gap  #线和线之间的间隔
+                # expansion_x_front=config.GrabPointCalculationConfig.expansion_x_front  #前四层大车方向（x）外扩系数.
+                # expansion_y_front=config.GrabPointCalculationConfig.expansion_y_front  #前四层小车方向（y）外扩系数.
                 
-                expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
-                expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
-                block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
-                block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度    
-                plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
-                plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
-                bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
-                retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
-                Sign=config.GrabPointCalculationConfig.Sign  #使用线性函数
-                k=config.GrabPointCalculationConfig.k  #线性函数的斜率
-                b=config.GrabPointCalculationConfig.b  #线性函数的截距
+                # expansion_x_back=config.GrabPointCalculationConfig.expansion_x_back  #后四层大车方向（x）外扩系数.
+                # expansion_y_back=config.GrabPointCalculationConfig.expansion_y_back  #后四层小车方向（y）外扩系数.
+                # block_width=config.GrabPointCalculationConfig.block_width  #每个分块的宽度
+                # block_length=config.GrabPointCalculationConfig.block_length  #每个分块的长度    
+                # plane_threshold=config.GrabPointCalculationConfig.plane_threshold  #平面阈值
+                # plane_distance=config.GrabPointCalculationConfig.plane_distance  #平面的情况抓取点移动的距离
+                # bevel_distance=config.GrabPointCalculationConfig.bevel_distance  #斜面的情况抓取点移动的距离
+                # retain_height=config.GrabPointCalculationConfig.retain_height  #保留高度
+                # Sign=config.GrabPointCalculationConfig.Sign  #使用线性函数
+                # k=config.GrabPointCalculationConfig.k  #线性函数的斜率
+                # b=config.GrabPointCalculationConfig.b  #线性函数的截距
+
+                line_width=header_info.get('lineWidth',4)  #线宽
+                floor_height=header_info.get('floorHeight',2)  #层高
+                safe_distance_x_negative_init=header_info.get('safeDistanceXNegativeInit',5)  #大车左侧安全距离
+                safe_distance_x_positive_init=header_info.get('safeDistanceXPositiveInit',5)  #大车右侧安全距离
+                safe_distance_y_ocean_init=header_info.get('safeDistanceYOceanInit',5)  #海侧安全距离
+                safe_distance_y_land_init=header_info.get('safeDistanceYLandInit',5)  #陆侧安全距离
+                hatch_depth=header_info.get('hatchDepth',16)  # 型深
+                line_gap=header_info.get('lineGap',0.5)  #线和线之间的间隔
+                expansion_x_front=header_info.get('expansionXFront',0.4)  #前四层大车方向（x）外扩系数.
+                expansion_y_front=header_info.get('expansionYFront',0.5)  #前四层小车方向（y）外扩系数.
+                expansion_x_back=header_info.get('expansionXBack',0.9)  #后四层大车方向（x）外扩系数.
+                expansion_y_back=header_info.get('expansionYBack',0.9)  #后四层小车方向（y）外扩系数.
+                block_width=header_info.get('blockWidth',1)  #每个分块的宽度
+                block_length=header_info.get('blockLength',1)  #每个分块的长度    
+                plane_threshold=header_info.get('planeThreshold',0.3)  #平面阈值
+                plane_distance=header_info.get('planeDistance',1)  #平面的情况抓取点移动的距离
+                bevel_distance=header_info.get('bevelDistance',2.5)  #斜面的情况抓取点移动的距离
+                retain_height=header_info.get('retainHeight',0.5)  #保留高度
+                Sign=header_info.get('signFlag',0)  #使用线性函数
+                k=header_info.get('kValue',1)  #线性函数的斜率
+                b=header_info.get('bValue',-1)  #线性函数的截距
+                config_height_diff=header_info.get('heightDiff',3.5)  #高度差
+
+
 
                 
                 #最大高度差
@@ -3650,7 +3726,7 @@ async def main():
                 for num, height in line_heights_dict.items():
                     if num!=current_line:
                         height_diff=abs(current_line_height-height)
-                        if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                        if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
                             logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
                             #启动换线
                             need_change_line=True
@@ -3687,7 +3763,7 @@ async def main():
                       for num, height in line_heights_dict.items():
                           if num != current_line:
                               height_diff = abs(current_line_height - height)
-                              if (height_diff>config.GrabPointCalculationConfig.height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                              if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
                                   need_change_line = True
                                   break
                       if len(tried_lines)==total_lines and need_change_line:
