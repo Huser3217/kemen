@@ -31,6 +31,10 @@ from math import floor
 import importlib
 import sys
 import subprocess
+import multiprocessing
+import queue
+import threading
+from multiprocessing import Process, Queue, Event
 
 # from config import GrabPointCalculationConfig
 # import config
@@ -39,6 +43,222 @@ warnings.filterwarnings(
     category=FutureWarning,
     module="sklearn"
 )
+
+# 在文件顶部添加子进程函数
+def depth_measurement_subprocess(coal_pile_points, current_hatch, hatch_height, result_queue, stop_event):
+    """
+    独立的子进程函数，用于执行船舱深度测量
+    
+    参数:
+        coal_pile_points: 煤堆点云数据
+        current_hatch: 当前舱口号
+        hatch_height: 舱口高度
+        result_queue: 结果队列
+        stop_event: 停止事件
+    """
+    try:
+        # 导入子进程需要的模块
+        import numpy as np
+        import open3d as o3d
+        import logging
+        import time
+        import os
+        
+        # 配置子进程日志
+        logger = logging.getLogger(f'depth_measurement_subprocess_{current_hatch}')
+        logger.setLevel(logging.INFO)
+        
+        # 检查是否需要停止
+        if stop_event.is_set():
+            return
+            
+        logger.info(f"子进程开始执行船舱深度测量，舱口号: {current_hatch}")
+        
+        # 创建点云对象
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(coal_pile_points)
+        
+        # 点云预处理
+        def preprocess_point_cloud(pcd, voxel_size=0.1, nb_neighbors=20, std_ratio=2.0):
+            logger.info(f"原始点云包含 {len(pcd.points)} 个点")
+            pcd_filtered, _ = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+            logger.info(f"去噪后点云包含 {len(pcd_filtered.points)} 个点")
+            return pcd_filtered
+        
+        # 检测舱底平面
+        def detect_bottom_plane(pcd, distance_threshold=0.05, ransac_n=3, num_iterations=5000):
+            logger.info("正在检测舱底平面...")
+            plane_model, inliers = pcd.segment_plane(
+                distance_threshold=distance_threshold,
+                ransac_n=ransac_n,
+                num_iterations=num_iterations
+            )
+            inlier_cloud = pcd.select_by_index(inliers)
+            inlier_points = np.asarray(inlier_cloud.points)
+            return plane_model, inlier_points
+        
+        # 验证平面角度
+        def calculate_angle_with_z_axis(plane_model, threshold=15):
+            a, b, c, d = plane_model
+            normal = np.array([a, b, c], dtype=float)
+            normal /= np.linalg.norm(normal)
+            z_axis = np.array([0.0, 0.0, 1.0])
+            dot_val = np.clip(np.dot(normal, z_axis), -1.0, 1.0)
+            angle_deg = np.degrees(np.arccos(abs(dot_val)))
+            logger.info(f"平面与z轴的夹角: {angle_deg:.2f} 度")
+            return angle_deg <= threshold
+        
+        # 验证平面高度分布
+        def validate_bottom_plane_by_height(points, height_threshold=5.0):
+            z = points[:, 2]
+            height_diff = np.max(z) - np.min(z)
+            logger.info(f"高度差: {height_diff:.2f} 米")
+            return height_diff <= height_threshold
+        
+        # 检查停止事件
+        if stop_event.is_set():
+            return
+            
+        # 执行测量流程
+        pcd_processed = preprocess_point_cloud(pcd, voxel_size=0.1)
+        
+        if stop_event.is_set():
+            return
+            
+        plane_model, plane_points = detect_bottom_plane(pcd_processed)
+        
+        # 验证平面
+        is_valid_bottom_plane = (calculate_angle_with_z_axis(plane_model) and 
+                               validate_bottom_plane_by_height(plane_points))
+        
+        if not is_valid_bottom_plane:
+            logger.warning("检测到的平面可能不是舱底平面")
+            
+        # 计算结果
+        bottom_depth = np.mean(plane_points[:, 2])
+        hatch_depth = abs(hatch_height - bottom_depth)
+        
+        logger.info(f"舱底深度: {bottom_depth:.2f} 米")
+        logger.info(f"型深: {hatch_depth:.2f} 米")
+        
+        # 准备结果数据
+        result_data = {
+            'bottom_depth': float(bottom_depth),
+            'is_valid': bool(is_valid_bottom_plane),
+            'plane_model': plane_model.tolist(),
+            'timestamp': time.time(),
+            'point_count': len(plane_points),
+            'current_hatch': current_hatch,
+            'hatch_depth': float(hatch_depth)
+        }
+        
+        # 将结果放入队列
+        if not stop_event.is_set():
+            result_queue.put(result_data)
+            logger.info("子进程测量完成，结果已放入队列")
+            
+    except Exception as e:
+        # 错误处理
+        error_result = {
+            'error': str(e),
+            'current_hatch': current_hatch,
+            'timestamp': time.time()
+        }
+        try:
+            result_queue.put(error_result)
+        except:
+            pass
+        logger.exception(f"子进程执行失败: {e}")
+
+# 全局变量用于管理子进程
+_depth_measurement_process = None
+_depth_result_queue = None
+_depth_stop_event = None
+
+def start_depth_measurement_subprocess(world_coal_pile_points, current_hatch, hatch_height):
+    """
+    启动深度测量子进程
+    """
+    global _depth_measurement_process, _depth_result_queue, _depth_stop_event
+    
+    try:
+        # 停止之前的进程（如果存在）
+        stop_depth_measurement_subprocess()
+        
+        # 创建新的队列和事件
+        _depth_result_queue = Queue()
+        _depth_stop_event = Event()
+        
+        # 启动子进程
+        _depth_measurement_process = Process(
+            target=depth_measurement_subprocess,
+            args=(world_coal_pile_points, current_hatch, hatch_height, _depth_result_queue, _depth_stop_event)
+        )
+        _depth_measurement_process.start()
+        
+        logger.info(f"已启动深度测量子进程，舱口号: {current_hatch}")
+        return True
+        
+    except Exception as e:
+        logger.exception(f"启动深度测量子进程失败: {e}")
+        return False
+
+def get_depth_measurement_result():
+    """
+    获取深度测量结果（非阻塞）
+    """
+    global _depth_result_queue
+    
+    if _depth_result_queue is None:
+        return None
+        
+    try:
+        # 非阻塞获取结果
+        result = _depth_result_queue.get_nowait()
+        return result
+    except queue.Empty:
+        return None
+    except Exception as e:
+        logger.exception(f"获取深度测量结果失败: {e}")
+        return None
+
+def stop_depth_measurement_subprocess():
+    """
+    停止深度测量子进程并清理资源
+    """
+    global _depth_measurement_process, _depth_result_queue, _depth_stop_event
+    
+    try:
+        # 设置停止事件
+        if _depth_stop_event:
+            _depth_stop_event.set()
+        
+        # 终止进程
+        if _depth_measurement_process and _depth_measurement_process.is_alive():
+            _depth_measurement_process.terminate()
+            _depth_measurement_process.join(timeout=5)  # 等待最多5秒
+            
+            if _depth_measurement_process.is_alive():
+                _depth_measurement_process.kill()  # 强制杀死
+                _depth_measurement_process.join()
+                
+        # 清理队列
+        if _depth_result_queue:
+            try:
+                while True:
+                    _depth_result_queue.get_nowait()
+            except queue.Empty:
+                pass
+        
+        # 重置全局变量
+        _depth_measurement_process = None
+        _depth_result_queue = None
+        _depth_stop_event = None
+        
+        logger.info("深度测量子进程已停止并清理资源")
+        
+    except Exception as e:
+        logger.exception(f"停止深度测量子进程失败: {e}")
 
 
 # 禁用websockets库的日志
@@ -3503,44 +3723,45 @@ async def main():
                 logger.info(f"舱口的高度为：{hatch_height}")
                 logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
 
-                  # 当高度差大于16米时，异步启动船舱深度测量，不阻塞后续计算
+                # 当高度差大于16米时，启动子进程进行船舱深度测量
                 if height_diff > 16:
                     try:
-                        # 保存煤堆点云数据到临时文件
-                        temp_data_file = os.path.join(os.path.dirname(__file__), "temp_coal_pile_data.npy")
-                        np.save(temp_data_file, world_coal_pile_points)
-                        logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
+                        # 启动深度测量子进程
+                        success = start_depth_measurement_subprocess(
+                            world_coal_pile_points, 
+                            current_hatch, 
+                            hatch_height
+                        )
                         
-                        # 启动measure_depth.py脚本，传递数据文件路径和舱口号
-                        script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
-                        subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch),str(hatch_height)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}")
-                        # 在需要使用舱底深度的地方
-
+                        if success:
+                            logger.info(f"已启动船舱深度测量子进程，舱口号: {current_hatch}")
+                        else:
+                            logger.error("启动船舱深度测量子进程失败")
+                            
                     except Exception as e:
-                        logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
+                        logger.exception(f"启动船舱深度测量子进程失败: {e}")
 
-
-                depth_result = get_bottom_depth_result()
-                if depth_result and depth_result['current_hatch'] == current_hatch:
-                    bottom_depth = depth_result['bottom_depth']
-                    is_depth_valid = depth_result['is_valid']
-                    
-                    if is_depth_valid:
-                    
-
-                        hatch_depth_data={
-                        'type':5,
-                        'current_hatch': int(current_hatch),
-                        'hatch_depth': float(depth_result['hatch_depth']),
-                                 }
-                
-                        await ws_manager.send_message(json.dumps(hatch_depth_data, ensure_ascii=False))
-                        print(f"发送给java后台的数据:{hatch_depth_data}")
-
+                # 尝试获取深度测量结果
+                depth_result = get_depth_measurement_result()
+                if depth_result and depth_result.get('current_hatch') == current_hatch:
+                    # 检查是否有错误
+                    if 'error' in depth_result:
+                        logger.error(f"深度测量子进程出错: {depth_result['error']}")
                     else:
-                        logger.info("获取到的舱底深度数据无效,不是舱底平面")
-
+                        bottom_depth = depth_result['bottom_depth']
+                        is_depth_valid = depth_result['is_valid']
+                        
+                        if is_depth_valid:
+                            hatch_depth_data = {
+                                'type': 5,
+                                'current_hatch': int(current_hatch),
+                                'hatch_depth': float(depth_result['hatch_depth']),
+                            }
+                            
+                            await ws_manager.send_message(json.dumps(hatch_depth_data, ensure_ascii=False))
+                            print(f"发送给java后台的数据:{hatch_depth_data}")
+                        else:
+                            logger.info("获取到的舱底深度数据无效,不是舱底平面")
                 else:
                     logger.info("暂未获取到舱底深度数据")
 
@@ -4045,6 +4266,8 @@ async def main():
         # 确保在程序结束时关闭WebSocket连接
         if ws_manager:
             await ws_manager.disconnect()
+        # 停止深度测量子进程
+        stop_depth_measurement_subprocess()
 
 
 
@@ -4057,5 +4280,3 @@ if __name__ == "__main__":
         logger.info("程序已手动停止。")
     except Exception as e:
         logger.error(f"程序运行出错: {e}",exc_info= True)
-
-
