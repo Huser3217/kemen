@@ -29,6 +29,8 @@ import warnings
 import math
 from math import floor
 import importlib
+import sys
+import subprocess
 
 # from config import GrabPointCalculationConfig
 import config
@@ -3107,6 +3109,36 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     return capture_point,capture_point_layer
 
 
+def get_bottom_depth_result():
+    """
+    读取measure_deepth.py的测量结果
+    
+    返回:
+        dict: 包含舱底深度等信息的字典，如果读取失败返回None
+    """
+    result_file_path = os.path.join(os.path.dirname(__file__), "depth_measurement_result.json")
+    
+    try:
+        if os.path.exists(result_file_path):
+            with open(result_file_path, 'r', encoding='utf-8') as f:
+                result_data = json.load(f)
+            
+            # 检查结果是否是最近的（5分钟内）
+            current_time = time.time()
+            if current_time - result_data.get('timestamp', 0) < 300:  # 5分钟
+                logger.info(f"读取到舱底深度测量结果: {result_data['bottom_depth']:.2f}米")
+                return result_data
+            else:
+                logger.warning("舱底深度测量结果过期")
+                return None
+        else:
+            logger.warning("舱底深度测量结果文件不存在")
+            return None
+    except Exception as e:
+        logger.exception(f"读取舱底深度测量结果失败: {e}",exc_info=True)
+        return None
+
+
 # 全局广播服务器实例
 broadcast_server = None
 
@@ -3139,7 +3171,7 @@ async def main():
 
     try:
 
-        VIS_ORIGINAL_3D = False  # 可视化原始点云
+        VIS_ORIGINAL_3D = True  # 可视化原始点云
         VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
         VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
         VISUALIZE_FINAL_RESULT =False      # 可视化最终结果
@@ -3394,6 +3426,51 @@ async def main():
                 logger.info(f"当前煤面的高度为：{current_coal_height}")
                 logger.info(f"舱口的高度为：{hatch_height}")
                 logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
+
+                  # 当高度差大于16米时，异步启动船舱深度测量，不阻塞后续计算
+                if height_diff > 16:
+                    try:
+                        # 保存煤堆点云数据到临时文件
+                        temp_data_file = os.path.join(os.path.dirname(__file__), "temp_coal_pile_data.npy")
+                        np.save(temp_data_file, world_coal_pile_points)
+                        logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
+                        
+                        # 启动measure_depth.py脚本，传递数据文件路径和舱口号
+                        script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
+                        subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch),str(hatch_height)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}")
+                        # 在需要使用舱底深度的地方
+
+                    except Exception as e:
+                        logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
+
+
+                depth_result = get_bottom_depth_result()
+                if depth_result and depth_result['current_hatch'] == current_hatch:
+                    bottom_depth = depth_result['bottom_depth']
+                    is_depth_valid = depth_result['is_valid']
+                    
+                    if is_depth_valid:
+                    
+
+                        hatch_depth_data={
+                        'type':5,
+                        'current_hatch': int(current_hatch),
+                        'hatch_depth': float(depth_result['hatch_depth']),
+                                 }
+                
+                        await ws_manager.send_message(json.dumps(hatch_depth_data, ensure_ascii=False))
+                        print(f"发送给java后台的数据:{hatch_depth_data}")
+
+                    else:
+                        logger.info("获取到的舱底深度数据无效,不是舱底平面")
+
+                else:
+                    logger.info("暂未获取到舱底深度数据")
+
+
+
+
                 #计算当前煤面在哪一层
                 current_layer = math.ceil(height_diff / floor_height)
                 logger.info(f"当前煤面在第{current_layer}层")
@@ -3750,9 +3827,9 @@ async def main():
                     #发给java后台的数据,，type=4 表示作业结束，没有可以作业的线
                     to_java_data={
                         'type':4,
-                        'timestamp': 0,
-                        'points_lidar': [],
-                        'points_world': [],
+                        'timestamp': int(time.time() * 1000),  # 毫秒时间戳
+                        'points_lidar': hatch_corners_refined.tolist(),
+                        'points_world': points_world.tolist(),
                         'current_machine_position': 0,
                         'capture_point': {'x': 0, 'y': 0, 'z': 0},
                         'capture_point2': {'x': 0, 'y': 0, 'z': 0},
@@ -3762,8 +3839,8 @@ async def main():
                         'capture_point2_layer': 0,
                         'capture_point_layer_min_height': 0.0,
                         'capture_point2_layer_min_height': 0.0,
-                        'current_hatch': 0,
-                        'current_unLoadShip': 0
+                        'current_hatch': int(current_hatch),
+                        'current_unLoadShip':3
                     }
                
                     #发送给我连接的java服务器
@@ -3771,7 +3848,9 @@ async def main():
 
                     await ws_manager.send_message(json_message)
                     print(f"发送给java后台的数据:{to_java_data}")
-                
+
+                    await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
+
                 else:
                     # 检查是否为WebSocket相关异常
                     if isinstance(e, (websockets.exceptions.WebSocketException, 
@@ -3796,14 +3875,15 @@ async def main():
                             'capture_point2_layer': 0,
                             'capture_point_layer_min_height': 0.0,
                             'capture_point2_layer_min_height': 0.0,
-                            'current_hatch': 0,
-                            'current_unLoadShip': 0
+                            'current_hatch': int(current_hatch),
+                            'current_unLoadShip':3
                         }
                 
                         # 发送给我连接的java服务器
                         json_message = json.dumps(to_java_data, ensure_ascii=False)
                         await ws_manager.send_message(json_message)
                         print(f"发送给java后台的数据:{to_java_data}")
+ 
 
                 await asyncio.sleep(0.5)  # 等待0.5秒后继续下一次循环
                 continue  # 继续下一次while循环
