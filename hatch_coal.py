@@ -32,8 +32,8 @@ import importlib
 import sys
 import subprocess
 
-# from config import GrabPointCalculationConfig
-# import config
+from config import GrabPointCalculationConfig
+import config
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -368,7 +368,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
     # print("步骤 1: 正在将YZ点投影到2D栅格图像...")
     
     # 栅格化参数
-    pixel_size = 0.15  # 栅格分辨率，即每个像素代表的物理尺寸（米/像素）
+    pixel_size = 0.1  # 栅格分辨率，即每个像素代表的物理尺寸（米/像素）
     
     # 获取YZ坐标的最小值，用于将物理坐标映射到像素坐标的原点
     min_yz = np.min(yz_points, axis=0)
@@ -983,8 +983,8 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
                 if total_pixel_count > 0:
                     white_ratio = white_pixel_count / total_pixel_count
                     
-                    # 当白色像素比例达到40%时，认为找到了边界
-                    if white_ratio >= 0.4:
+                    # 当白色像素比例达到35%时，认为找到了边界
+                    if white_ratio >= 0.35:
                         return dist
             
             # 如果扫描到图像边界都没找到边缘，返回最大扫描距离
@@ -2955,10 +2955,11 @@ def world_to_lidar_with_x(points_world, translation, rotation_angles=[0, 0, 0], 
     return points_lidar.T
 
 def calculate_capture_point(world_coal_pile_points, lines_dict, current_line, 
-                          exclude_x_center, exclude_y_center, exclude_radius,
+                          exclude_x_center, exclude_y_center, exclude_radius,x_left,x_right,y_front,y_back,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
-                          plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,logger):
+                          plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
+                          x_dump_truck,y_dump_truck,limited_change_height,logger):
     """
     计算抓取点的核心函数
     
@@ -3132,7 +3133,19 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
     # 计算 XY 平面中心点
     avg_x = np.mean(center_xs)
+    if abs(avg_x-x_left)<=x_dump_truck or abs(avg_x-x_right)<=x_dump_truck:
+        x_dump_truck_flag=True
+    else:
+        x_dump_truck_flag=False
+
+
     avg_y = np.mean(center_ys)
+    if abs(avg_y-y_front)<=y_dump_truck or abs(avg_y-y_back)<=y_dump_truck:
+        y_dump_truck_flag=True
+    else:
+        y_dump_truck_flag=False
+
+
     
     # 判断这些块的高度的方差是否小于阈值
     if height_var < plane_threshold:
@@ -3140,18 +3153,40 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
         if Sign==1:
             avg_height = best_avg_height + k*height_var+b
+            logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
             avg_height = best_avg_height + plane_distance
+            logger.info(f"高度改变了{plane_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
     else:
         # 如果大于阈值，就认为这些块不是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
         if Sign==1:
             avg_height = best_avg_height + k*height_var+b
+            logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
             avg_height = best_avg_height + bevel_distance
+            logger.info(f"高度改变了{bevel_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
 
-    if avg_height >= above_current_line_layer_min_height:
-        avg_height = above_current_line_layer_min_height
+
+
+    if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+        avg_height += limited_change_height
+        logger.info(f"海陆侧甩斗，高度增加{limited_change_height}，改变前为{avg_height-limited_change_height}，改变后为{avg_height}")
+        if avg_height>limited_height:
+            avg_height=limited_height
+            logger.info(f"超过限制高度，高度设置为{limited_height}")
+
+    else:
+        if avg_height >= above_current_line_layer_min_height:
+            avg_height = above_current_line_layer_min_height
+            logger.info(f"高于当前线所在层的上1.5层的最低高度，高度设置为{above_current_line_layer_min_height}")
+
+
+        
+
+            
+
+
     # 计算抓取点处于哪一层
     capture_point_layer = math.ceil(abs(hatch_height - avg_height) / floor_height)
     
@@ -3228,7 +3263,7 @@ async def main():
         VIS_ORIGINAL_3D = False  # 可视化原始点云
         VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
         VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
-        VISUALIZE_FINAL_RESULT =False      # 可视化最终结果
+        VISUALIZE_FINAL_RESULT = False      # 可视化最终结果
         visualize_clustered_pcd = False  # 可视化聚类后的结果
        
         # 安装参数
@@ -3258,7 +3293,7 @@ async def main():
                     await asyncio.sleep(0.5)  # 等待0.5秒后重试
                     continue
 
-                # importlib.reload(config)
+                importlib.reload(config)
                 # print(config.GrabPointCalculationConfig.hatch_depth)
                 
                 current_hatch = header_info.get('current_hatch', 0)
@@ -3561,10 +3596,10 @@ async def main():
                     safe_distance_x_positive=safe_distance_x_positive_init-((current_layer-1)*expansion_x_front)
                     safe_distance_y_ocean=safe_distance_y_ocean_init-((current_layer-1)*expansion_y_front)
                     safe_distance_y_land=safe_distance_y_land_init-((current_layer-1)*expansion_y_front)
-                    if safe_distance_x_negative<=0.6:
-                        safe_distance_x_negative=0.6
-                    if safe_distance_x_positive<=0.6:
-                        safe_distance_x_positive=0.6
+                    if safe_distance_x_negative<=0.4:
+                        safe_distance_x_negative=0.4
+                    if safe_distance_x_positive<=0.4:
+                        safe_distance_x_positive=0.4
                     if safe_distance_y_ocean<=0:
                         safe_distance_y_ocean=0
                     if safe_distance_y_land<=0:
@@ -3580,10 +3615,10 @@ async def main():
                     safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
                     safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
                 
-                    if safe_distance_x_negative<=0.6:
-                        safe_distance_x_negative=0.6
-                    if safe_distance_x_positive<=0.6:
-                        safe_distance_x_positive=0.6
+                    if safe_distance_x_negative<=0.4:
+                        safe_distance_x_negative=0.4
+                    if safe_distance_x_positive<=0.4:
+                        safe_distance_x_positive=0.4
                     if safe_distance_y_ocean<=0:
                         safe_distance_y_ocean=0
                     if safe_distance_y_land<=0:
@@ -3602,13 +3637,16 @@ async def main():
                 #确定线的位置
                 #舱口长宽减去安全距离的xy坐标轴范围
                 
-                
+                x_left=max(points_world[1][0],points_world[0][0])
+                x_right=min(points_world[2][0],points_world[3][0])
                 x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x_negative
                 x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x_positive
                 
-                
-                y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+3.1
-                y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-3.1
+                y_front=min(points_world[1][1],points_world[2][1])
+                y_back=max(points_world[0][1],points_world[3][1])
+                y_expansion=3.1
+                y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_expansion
+                y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_expansion
                 logger.info(f"x_positive为：{x_positive}")
                 logger.info(f"x_negative为：{x_negative}")
                 logger.info(f"y_ocean为：{y_ocean}")
@@ -3732,7 +3770,7 @@ async def main():
                     if num!=current_line:
                         height_diff=abs(current_line_height-height)
                         if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于4米，需要换线")
+                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
                             #启动换线
                             need_change_line=True
 
@@ -3788,11 +3826,20 @@ async def main():
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
 
-                # if current_line_layer>=6
+                limited_layers=config.GrabPointCalculationConfig.limited_layers
+                limited_height=hatch_height-(config.GrabPointCalculationConfig.limited_height*floor_height)
+                x_dump_truck=config.GrabPointCalculationConfig.x_dump_truck
+                y_dump_truck=config.GrabPointCalculationConfig.y_dump_truck
+                limited_change_height=config.GrabPointCalculationConfig.limited_change_height
 
 
-                above_current_line_layer=current_line_layer-1
-                above_current_line_layer_min_height=hatch_height-(above_current_line_layer*floor_height)+1
+                
+                if current_line_layer>=limited_layers:
+                    enable_limited_flag=True
+
+
+                above_current_line_layer=current_line_layer-1.5
+                above_current_line_layer_min_height=hatch_height-(above_current_line_layer*floor_height)
 
                 
                 need_calculate_two=False
@@ -3808,6 +3855,10 @@ async def main():
                         exclude_x_center=last_capture_point_x,
                         exclude_y_center=last_capture_point_y,
                         exclude_radius=2,
+                        x_left=x_left,
+                        x_right=x_right,
+                        y_front=y_front,
+                        y_back=y_back,
                         y_land=y_land,
                         y_ocean=y_ocean,
                         hatch_height=hatch_height,
@@ -3823,6 +3874,11 @@ async def main():
                         k=k,
                         b=b,
                         above_current_line_layer_min_height=above_current_line_layer_min_height,
+                        enable_limited_flag=enable_limited_flag,
+                        limited_height=limited_height,
+                        x_dump_truck=x_dump_truck,
+                        y_dump_truck=y_dump_truck,
+                        limited_change_height=limited_change_height,
                         logger=logger
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
@@ -3835,6 +3891,10 @@ async def main():
                         exclude_x_center=capture_point['x'],
                         exclude_y_center=capture_point['y'],
                         exclude_radius=2,
+                        x_left=x_left,
+                        x_right=x_right,
+                        y_front=y_front,
+                        y_back=y_back,
                         y_land=y_land,
                         y_ocean=y_ocean,
                         hatch_height=hatch_height,
@@ -3850,6 +3910,11 @@ async def main():
                         k=k,
                         b=b,
                         above_current_line_layer_min_height=above_current_line_layer_min_height,
+                        enable_limited_flag=enable_limited_flag,
+                        limited_height=limited_height,
+                        x_dump_truck=x_dump_truck,
+                        y_dump_truck=y_dump_truck,
+                        limited_change_height=limited_change_height,
                         logger=logger
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
@@ -3866,6 +3931,10 @@ async def main():
                             exclude_x_center=last_capture_point_x,
                             exclude_y_center=last_capture_point_y,
                             exclude_radius=2,
+                            x_left=x_left,
+                            x_right=x_right,
+                            y_front=y_front,
+                            y_back=y_back,
                             y_land=y_land,
                             y_ocean=y_ocean,
                             hatch_height=hatch_height,
@@ -3881,6 +3950,11 @@ async def main():
                             k=k,
                             b=b,
                             above_current_line_layer_min_height=above_current_line_layer_min_height,
+                            enable_limited_flag=enable_limited_flag,
+                            limited_height=limited_height,
+                            x_dump_truck=x_dump_truck,
+                            y_dump_truck=y_dump_truck,
+                            limited_change_height=limited_change_height,
                             logger=logger
                                 )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
