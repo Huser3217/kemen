@@ -944,7 +944,7 @@ def find_rectangle_by_histogram_method(filtered_points,radar_center_y,radar_cent
             
             # 根据扫描方向确定扫描线长度
             if abs(direction[0]) > abs(direction[1]):  # Y轴方向（水平方向）
-                scan_line_length = int(15.0 / pixel_size)  # Y轴方向30米
+                scan_line_length = int(14.0 / pixel_size)  # Y轴方向30米
             else:  # Z轴方向（垂直方向）
                 scan_line_length = int(10.0 / pixel_size)  # Z轴方向20米
             
@@ -2959,7 +2959,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height,logger):
+                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,logger):
     """
     计算抓取点的核心函数
     
@@ -3014,8 +3014,24 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     current_line_points_blocks_heights = {}
     x_min, x_max = lines_dict[current_line]
     y_min, y_max = y_land, y_ocean
-    n_y = int(floor((y_max - y_min) / block_length))
-    n_x = int(floor((x_max - x_min) / block_width))
+
+    # 计算原始的分块数量
+    original_n_y = int(floor((y_max - y_min) / block_length))
+    original_n_x = int(floor((x_max - x_min) / block_width))
+    
+    if enable_limited_flag:
+
+        # 计算y方向的剩余距离
+        remaining_y = (y_max - y_min) - original_n_y * block_length
+        # 如果y方向有剩余距离，则增加一个分块
+        n_y = original_n_y + (1 if remaining_y > 0.1 else 0)
+        n_x = original_n_x  # x方向不变，因为刚好整除
+    
+    else:
+        n_y = original_n_y
+        n_x = original_n_x
+
+
     
     # 总共分了多少块
     total_blocks = n_y * n_x
@@ -3030,8 +3046,16 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
             y_min_block = y_min + i * block_length
             y_max_block = y_min + (i + 1) * block_length
 
+            if enable_limited_flag:
+                if i == n_y - 1 and remaining_y > 0.1:
+                     y_max_block = y_max  # 扩展到实际边界
+                else:
+                     y_max_block = y_min + (i + 1) * block_length
+
+
+
             # 计算当前分块的面积
-            block_area = block_width * block_length
+            block_area = block_width * (y_max_block - y_min_block)
 
             # 计算分块与排除区域的交集面积
             overlap_x_min = max(x_min_block, remove_x_negative)
@@ -3145,6 +3169,13 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     else:
         y_dump_truck_flag=False
 
+    if avg_y>=y_front:
+        avg_y=y_front
+    
+    if avg_y<=y_back:
+        avg_y=y_back
+
+
 
     
     # 判断这些块的高度的方差是否小于阈值
@@ -3172,9 +3203,9 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
         avg_height += limited_change_height
         logger.info(f"海陆侧甩斗，高度增加{limited_change_height}，改变前为{avg_height-limited_change_height}，改变后为{avg_height}")
-        if avg_height>limited_height:
-            avg_height=limited_height
-            logger.info(f"超过限制高度，高度设置为{limited_height}")
+        if avg_height>min(above_current_line_layer2_min_height,limited_height):
+            avg_height=min(above_current_line_layer2_min_height,limited_height)
+            logger.info(f"超过限制高度，高度设置为{min(above_current_line_layer2_min_height,limited_height)}")
 
     else:
         if avg_height >= above_current_line_layer_min_height:
@@ -3254,7 +3285,7 @@ async def main():
     # 定义一个变量来存储换线方向
     # 1: 沿X轴正方向换线 (编号增加的方向)
     # -1: 沿X轴负方向换线 (编号减少的方向)
-    persisted_line_change_direction = -1 
+    persisted_line_change_direction = 1 
 
 
 
@@ -3837,10 +3868,14 @@ async def main():
                 if current_line_layer>=limited_layers:
                     enable_limited_flag=True
 
-
-                above_current_line_layer=current_line_layer-1.5
+                #大车方向甩斗的高度限制
+                above_current_line_layer=current_line_layer-2
                 above_current_line_layer_min_height=hatch_height-(above_current_line_layer*floor_height)
 
+                #小车方向甩斗的高度限制
+
+                above_current_line_layer2=current_line_layer-2.5
+                above_current_line_layer2_min_height=hatch_height-(above_current_line_layer2*floor_height)
                 
                 need_calculate_two=False
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
@@ -3879,6 +3914,7 @@ async def main():
                         x_dump_truck=x_dump_truck,
                         y_dump_truck=y_dump_truck,
                         limited_change_height=limited_change_height,
+                        above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         logger=logger
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
@@ -3915,6 +3951,7 @@ async def main():
                         x_dump_truck=x_dump_truck,
                         y_dump_truck=y_dump_truck,
                         limited_change_height=limited_change_height,
+                        above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         logger=logger
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
@@ -3955,6 +3992,7 @@ async def main():
                             x_dump_truck=x_dump_truck,
                             y_dump_truck=y_dump_truck,
                             limited_change_height=limited_change_height,
+                            above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                             logger=logger
                                 )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
