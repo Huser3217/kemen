@@ -3140,6 +3140,10 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     # 打印最佳块
     logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
     
+    #取这些块的最高高度
+    max_height = max(best_block_heights)
+    logger.info(f"最佳块的最高高度: {max_height}")
+
     # 计算这些块的高度的方差
     height_var = np.var(best_block_heights)
     logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
@@ -3183,20 +3187,37 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         # 如果小于阈值，就认为这些块是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
         if Sign==1:
-            avg_height = best_avg_height + k*height_var+b
-            logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
+            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+                avg_height = max_height + k*height_var+b
+                logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
+            else:
+                avg_height = best_avg_height + k*height_var+b
+                logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
-            avg_height = best_avg_height + plane_distance
-            logger.info(f"高度改变了{plane_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
+            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+                avg_height = max_height + plane_distance
+                logger.info(f"高度改变了{plane_distance}米，改变前为{max_height}，改变后为{avg_height}")
+            else:
+                avg_height = best_avg_height + plane_distance
+                logger.info(f"高度改变了{plane_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
     else:
         # 如果大于阈值，就认为这些块不是平面的
         logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
         if Sign==1:
-            avg_height = best_avg_height + k*height_var+b
-            logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
+            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+                avg_height = max_height + k*height_var+b
+                logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
+            else:
+                avg_height = best_avg_height + k*height_var+b
+                logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
-            avg_height = best_avg_height + bevel_distance
-            logger.info(f"高度改变了{bevel_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
+
+            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+                avg_height = max_height + bevel_distance
+                logger.info(f"高度改变了{bevel_distance}米，改变前为{max_height}，改变后为{avg_height}")
+            else:
+                avg_height = best_avg_height + bevel_distance
+                logger.info(f"高度改变了{bevel_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
 
 
 
@@ -3670,14 +3691,16 @@ async def main():
                 
                 x_left=max(points_world[1][0],points_world[0][0])
                 x_right=min(points_world[2][0],points_world[3][0])
+
                 x_negative =max(points_world[1][0],points_world[0][0])+safe_distance_x_negative
                 x_positive=min(points_world[2][0],points_world[3][0])-safe_distance_x_positive
                 
                 y_front=min(points_world[1][1],points_world[2][1])
                 y_back=max(points_world[0][1],points_world[3][1])
-                y_expansion=3.1
-                y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_expansion
-                y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_expansion
+                
+                y_grab_expansion=config.GrabPointCalculationConfig.y_grab_expansion
+                y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
+                y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
                 logger.info(f"x_positive为：{x_positive}")
                 logger.info(f"x_negative为：{x_negative}")
                 logger.info(f"y_ocean为：{y_ocean}")
@@ -3782,13 +3805,36 @@ async def main():
                     line_numbers = sorted(line_numbers)  # 确保从小到大
                     min_line = line_numbers[0]
                     max_line = line_numbers[-1]
-                
-                    next_line = current_line + direction
-                
-                    # 到达边界时反向
-                    if next_line < min_line or next_line > max_line:
-                        direction *= -1
+                    total_lines = len(line_numbers)
+                    
+                    # 如果总线数大于3条，使用新的换线策略
+                    if total_lines > 3:
+                        # 最左边的线的右边第一条线（第2条线）优先向左侧换线
+                        if current_line == min_line + 1:  # 第2条线
+                            # 优先向左侧（更小的线号）换线
+                                next_line = current_line - 1
+                                direction = -1
+
+                        # 最右边的线的左边第一条线（倒数第2条线）优先向右侧换线
+                        elif current_line == max_line - 1:  # 倒数第2条线
+                            # 优先向右侧（更大的线号）换线
+                                next_line = current_line + 1
+                                direction = 1
+
+                        else:
+                            # 其他线保持原有逻辑
+                            next_line = current_line + direction
+                            # 到达边界时反向
+                            if next_line < min_line or next_line > max_line:
+                                direction *= -1
+                                next_line = current_line + direction
+                    else:
+                        # 总线数不大于3条时，保持原有逻辑
                         next_line = current_line + direction
+                        # 到达边界时反向
+                        if next_line < min_line or next_line > max_line:
+                            direction *= -1
+                            next_line = current_line + direction
                 
                     return next_line, direction
                 
@@ -3801,7 +3847,10 @@ async def main():
                     if num!=current_line:
                         height_diff=abs(current_line_height-height)
                         if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                            if (height_diff>config_height_diff and current_line_height<height):
+                                 logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                            if (hatch_height-current_line_height)>=max_height_diff:
+                                logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
                             #启动换线
                             need_change_line=True
 
@@ -3838,6 +3887,10 @@ async def main():
                           if num != current_line:
                               height_diff = abs(current_line_height - height)
                               if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                  if (height_diff>config_height_diff and current_line_height<height):
+                                      logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                                  if (hatch_height-current_line_height)>=max_height_diff:
+                                      logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
                                   need_change_line = True
                                   break
                       if len(tried_lines)==total_lines and need_change_line:
@@ -3862,19 +3915,24 @@ async def main():
                 x_dump_truck=config.GrabPointCalculationConfig.x_dump_truck
                 y_dump_truck=config.GrabPointCalculationConfig.y_dump_truck
                 limited_change_height=config.GrabPointCalculationConfig.limited_change_height
+                limited_layers_y_dump_truck=config.GrabPointCalculationConfig.limited_layers_y_dump_truck
+                limited_layers_x_dump_truck=config.GrabPointCalculationConfig.limited_layers_x_dump_truck
 
 
                 
                 if current_line_layer>=limited_layers:
                     enable_limited_flag=True
+                else:
+                    enable_limited_flag=False
 
                 #大车方向甩斗的高度限制
-                above_current_line_layer=current_line_layer-2
+
+                above_current_line_layer=current_line_layer-limited_layers_x_dump_truck
                 above_current_line_layer_min_height=hatch_height-(above_current_line_layer*floor_height)
 
-                #小车方向甩斗的高度限制
 
-                above_current_line_layer2=current_line_layer-2.5
+                #小车方向甩斗的高度限制
+                above_current_line_layer2=current_line_layer-limited_layers_y_dump_truck
                 above_current_line_layer2_min_height=hatch_height-(above_current_line_layer2*floor_height)
                 
                 need_calculate_two=False
