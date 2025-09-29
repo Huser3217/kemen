@@ -138,7 +138,6 @@ async def main():
                 VISUALIZE_FINAL_RESULT = config.GrabPointCalculationConfig_170.VISUALIZE_FINAL_RESULT      # 可视化最终结果
                 visualize_clustered_pcd = config.GrabPointCalculationConfig_170.visualize_clustered_pcd  # 可视化聚类后的结果
                 visualize_coal_points = config.GrabPointCalculationConfig_170.visualize_coal_points  # 可视化煤堆点
-                
                 # 安装参数
                 translation = [1.58, 24.324, 31.4]
                     
@@ -269,11 +268,28 @@ async def main():
                 
                 points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
                 
+                hatch_recognize_success=True
+                if not IS_FIRST_TIME and not np.allclose(points_world, world_coords_refined, atol=2):
+                  #比较世界坐标系下的舱口坐标和上一次的舱口坐标是否合理points_world和world_coords_refined
+                    if VISUALIZE_FINAL_RESULT:
+                        visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
+                    points_world=world_coords_refined
+                    hatch_corners_refined=np.array([
+                    [hatch_corners['corner1']['x'], hatch_corners['corner1']['y'], hatch_corners['corner1']['z']],
+                    [hatch_corners['corner2']['x'], hatch_corners['corner2']['y'], hatch_corners['corner2']['z']],
+                    [hatch_corners['corner3']['x'], hatch_corners['corner3']['y'], hatch_corners['corner3']['z']],
+                    [hatch_corners['corner4']['x'], hatch_corners['corner4']['y'], hatch_corners['corner4']['z']]
+                        ], dtype=np.float32)
+
+                    hatch_recognize_success=False
+                    logger.warning(f"第{header_info.get('current_hatch', 0)}号舱的识别舱口坐标与上一次差值过大，可能是识别错误")
+
+                  
                 print("世界坐标系下的点：")
                 for i, (x, y, z) in enumerate(points_world):
-                    print(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")               
-                       
-                if VISUALIZE_FINAL_RESULT:
+                    print(f"点{i + 1}: ({x:+.3f}, {y:+.3f}, {z:+.3f})")
+
+                if VISUALIZE_FINAL_RESULT and hatch_recognize_success:
                     visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
                 
                 end_time_hatch = time.time()
@@ -286,19 +302,21 @@ async def main():
                 
                 
                 start_time_coal = time.time()
-                coal_pile_points = segment_coal_pile(
-                    original_points, hatch_corners_refined,
+                original_world_points = lidar_to_world_with_x(original_points[:, :3], translation, current_machine_position, rotation_angles)
+
+                world_coal_pile_points = segment_coal_pile_world_points(
+                    original_world_points, points_world,
                     eps_coal = config.GrabPointCalculationConfig_170.eps_coal,
                     min_samples_coal = config.GrabPointCalculationConfig_170.min_samples_coal,
-                    x_changes=config.GrabPointCalculationConfig_170.x_changes,
-                    yz_shrink_amount=config.GrabPointCalculationConfig_170.yz_shrink_amount,
+                    z_changes=config.GrabPointCalculationConfig_170.z_changes,
+                    xy_shrink_amount=config.GrabPointCalculationConfig_170.xy_shrink_amount,
                     visualize_dbscan=visualize_clustered_pcd
                         )
 
-                #将所有煤堆点转换为真实的坐标系下的点
-                world_coal_pile_points=lidar_to_world_with_x(coal_pile_points[:,:3],translation,current_machine_position,rotation_angles)
                 if visualize_coal_points:
+                    #可视化世界坐标系下的煤堆点
                     visualize_pcd_3d(world_coal_pile_points, title="世界坐标系下的煤堆点")
+
                 if len(world_coal_pile_points) > 0:
                     # print(f"成功分割出煤堆，包含 {len(coal_pile_points)} 个点")
                      # 构造煤堆数据
@@ -573,45 +591,6 @@ async def main():
                 else:
                     logger.info(f"大车当前处于第{current_line}条线")
                 
-
-
-                
-                # #定义一个函数，用来获取下一条线
-                # def get_next_line(current_line, direction, line_numbers, tried_lines=None):
-                #     line_numbers = sorted(line_numbers)  # 确保从小到大
-                #     min_line = line_numbers[0]
-                #     max_line = line_numbers[-1]
-                #     total_lines = len(line_numbers)
-                    
-                #     if tried_lines is None:
-                #         tried_lines = set()
-                    
-                #     # 如果总线数大于3条，使用新的换线策略
-                #     if total_lines > 3:
-                #         # 最左边的线的右边第一条线（第2条线）优先向左侧换线
-                #         if current_line == min_line + 1 and (current_line - 1) not in tried_lines:  # 第2条线且左边未尝试
-                #             next_line = current_line - 1
-                #             direction = -1
-                #         # 最右边的线的左边第一条线（倒数第2条线）优先向右侧换线
-                #         elif current_line == max_line - 1 and (current_line + 1) not in tried_lines:  # 倒数第2条线且右边未尝试
-                #             next_line = current_line + 1
-                #             direction = 1
-                #         else:
-                #             # 其他情况或优先方向已尝试过，使用原有逻辑
-                #             next_line = current_line + direction
-                #             # 到达边界时反向
-                #             if next_line < min_line or next_line > max_line:
-                #                 direction *= -1
-                #                 next_line = current_line + direction
-                #     else:
-                #         # 总线数不大于3条时，保持原有逻辑
-                #         next_line = current_line + direction
-                #         # 到达边界时反向
-                #         if next_line < min_line or next_line > max_line:
-                #             direction *= -1
-                #             next_line = current_line + direction
-                
-                #     return next_line, direction
                 
                 #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
                 current_line_height=line_heights_dict[current_line]
@@ -984,7 +963,7 @@ async def main():
                     'timestamp': int(time.time() * 1000),  # 毫秒时间戳
                     'points_lidar': hatch_corners_refined.tolist(),
                     'points_world': points_world.tolist(),
-                    'current_machine_position': current_machine_position,
+                    'current_machine_position': current_machine_position if hatch_recognize_success else last_machine_position,
                     'capture_point': capture_point,
                     'capture_point2':capture_point2,
                     'capture_point_effective':capture_point_effective,

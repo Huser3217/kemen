@@ -48,7 +48,7 @@ logging.getLogger('websockets.server').setLevel(logging.CRITICAL)
 
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-log_file_path = os.path.join(log_dir, "hatch_coal_170.log")
+log_file_path = os.path.join(log_dir, "hatch_coal_160.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -63,8 +63,6 @@ logger = logging.getLogger(__name__)
 
 
 
-
-
 # 定义二进制数据解析格式
 # 头部格式：魔数(4) + 版本(2) + 头长度(2) + 点大小(2) + 时间戳类型(2) + 帧ID(4) + 作业类型(4) + 上次大车位置(8) + 大车当前位置(8) + 当前作业舱口(4) + 计算信号(4) + 开始时间戳(8) + 结束时间戳(8) + 包数量(4) + 点数量(4) + 舱口坐标系四个角点坐标(96) + 世界坐标系四个角点坐标(96)
 HEADER_FORMAT = config.HEADER_FORMAT
@@ -73,10 +71,10 @@ POINT_FORMAT = config.POINT_FORMAT
 POINT_SIZE = config.POINT_SIZE
 
 # WebSocket服务器配置
-SERVER_HOST = config.GrabPointCalculationConfig_170.SERVER_HOST
-SERVER_PORT = config.GrabPointCalculationConfig_170.SERVER_PORT
-SERVER_PATH = config.GrabPointCalculationConfig_170.SERVER_PATH
-USER_ID = config.GrabPointCalculationConfig_170.USER_ID
+SERVER_HOST = config.GrabPointCalculationConfig_160.SERVER_HOST
+SERVER_PORT = config.GrabPointCalculationConfig_160.SERVER_PORT
+SERVER_PATH = config.GrabPointCalculationConfig_160.SERVER_PATH
+USER_ID = config.GrabPointCalculationConfig_160.USER_ID
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 
@@ -85,7 +83,7 @@ async def main():
     # 初始化WebSocket管理器
     ws_manager = WebSocketManager(URI,-1,1)
     # 初始化广播服务器
-    broadcast_server = CoalPileBroadcastServer(host=config.GrabPointCalculationConfig_170.BROADCAST_HOST, port=config.GrabPointCalculationConfig_170.BROADCAST_PORT)
+    broadcast_server = CoalPileBroadcastServer(host=config.GrabPointCalculationConfig_160.BROADCAST_HOST, port=config.GrabPointCalculationConfig_160.BROADCAST_PORT)
     
  # 启动广播服务器
     try:
@@ -132,13 +130,13 @@ async def main():
                 importlib.reload(config)
 
 
-                VIS_ORIGINAL_3D = config.GrabPointCalculationConfig_170.VIS_ORIGINAL_3D  # 可视化原始点云
-                VISUALIZE_COARSE_FILTRATION = config.GrabPointCalculationConfig_170.VISUALIZE_COARSE_FILTRATION   # 可视化粗过滤结果
-                VISUALIZE_RECTANGLE = config.GrabPointCalculationConfig_170.VISUALIZE_RECTANGLE  # 可视化矩形检测过程
-                VISUALIZE_FINAL_RESULT = config.GrabPointCalculationConfig_170.VISUALIZE_FINAL_RESULT      # 可视化最终结果
-                visualize_clustered_pcd = config.GrabPointCalculationConfig_170.visualize_clustered_pcd  # 可视化聚类后的结果
-                visualize_coal_points = config.GrabPointCalculationConfig_170.visualize_coal_points  # 可视化煤堆点
-                
+                VIS_ORIGINAL_3D = config.GrabPointCalculationConfig_160.VIS_ORIGINAL_3D  # 可视化原始点云
+                VISUALIZE_COARSE_FILTRATION = config.GrabPointCalculationConfig_160.VISUALIZE_COARSE_FILTRATION   # 可视化粗过滤结果
+                VISUALIZE_RECTANGLE = config.GrabPointCalculationConfig_160.VISUALIZE_RECTANGLE  # 可视化矩形检测过程
+                VISUALIZE_FINAL_RESULT = config.GrabPointCalculationConfig_160.VISUALIZE_FINAL_RESULT      # 可视化最终结果
+                visualize_clustered_pcd = config.GrabPointCalculationConfig_160.visualize_clustered_pcd  # 可视化聚类后的结果
+                visualize_coal_points = config.GrabPointCalculationConfig_160.visualize_coal_points  # 可视化煤堆点
+
                 # 安装参数
                 translation = [1.58, 24.324, 31.4]
                     
@@ -218,19 +216,19 @@ async def main():
                 # 调用粗过滤函数
                 coarse_filtered_points = coarse_filtration_point_cloud(
                     original_points,
-                    x_initial_threshold=config.GrabPointCalculationConfig_170.x_initial_threshold, 
-                    x_stat_percentage=config.GrabPointCalculationConfig_170.x_stat_percentage,
-                    x_filter_offset=config.GrabPointCalculationConfig_170.x_filter_offset,
-                    intensity_threshold=config.GrabPointCalculationConfig_170.intensity_threshold, #强度
-                    x_upper_bound_adjustment=config.GrabPointCalculationConfig_170.x_upper_bound_adjustment,
+                    x_initial_threshold=config.GrabPointCalculationConfig_160.x_initial_threshold, 
+                    x_stat_percentage=config.GrabPointCalculationConfig_160.x_stat_percentage,
+                    x_filter_offset=config.GrabPointCalculationConfig_160.x_filter_offset,
+                    intensity_threshold=config.GrabPointCalculationConfig_160.intensity_threshold, #强度
+                    x_upper_bound_adjustment=config.GrabPointCalculationConfig_160.x_upper_bound_adjustment,
                     visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
                 
                 
                 refined_box_corners_yz=find_rectangle_by_histogram_method(
                     coarse_filtered_points[:,:3],
-                    pixel_size=config.GrabPointCalculationConfig_170.pixel_size,
-                    kernel_size=config.GrabPointCalculationConfig_170.kernel_size,
-                    white_threshold=config.GrabPointCalculationConfig_170.white_threshold,
+                    pixel_size=config.GrabPointCalculationConfig_160.pixel_size,
+                    kernel_size=config.GrabPointCalculationConfig_160.kernel_size,
+                    white_threshold=config.GrabPointCalculationConfig_160.white_threshold,
                     radar_center_y=radar_center_y,
                     radar_center_z=radar_center_z,
                     is_first_time=IS_FIRST_TIME,
@@ -243,7 +241,10 @@ async def main():
                     else:
                         # 从3D坐标中提取YZ坐标，并赋值给 refined_box_corners_yz
                         # 假设X是深度，Y是水平，Z是垂直，那么YZ是第1和第2列
+
                         refined_box_corners_yz = hatch_corners_refined[:, 1:3]
+                        logger.info(f"舱口识别失败，使用上一次识别的舱口坐标：{refined_box_corners_yz}")
+                        
 
                 
                 
@@ -288,10 +289,10 @@ async def main():
                 start_time_coal = time.time()
                 coal_pile_points = segment_coal_pile(
                     original_points, hatch_corners_refined,
-                    eps_coal = config.GrabPointCalculationConfig_170.eps_coal,
-                    min_samples_coal = config.GrabPointCalculationConfig_170.min_samples_coal,
-                    x_changes=config.GrabPointCalculationConfig_170.x_changes,
-                    yz_shrink_amount=config.GrabPointCalculationConfig_170.yz_shrink_amount,
+                    eps_coal = config.GrabPointCalculationConfig_160.eps_coal,
+                    min_samples_coal = config.GrabPointCalculationConfig_160.min_samples_coal,
+                    x_changes=config.GrabPointCalculationConfig_160.x_changes,
+                    yz_shrink_amount=config.GrabPointCalculationConfig_160.yz_shrink_amount,
                     visualize_dbscan=visualize_clustered_pcd
                         )
 
@@ -347,28 +348,28 @@ async def main():
                 
                 
                 start_time_grab=time.time()
-                # line_width=config.GrabPointCalculationConfig_170.line_width  #线宽
-                # floor_height=config.GrabPointCalculationConfig_170.floor_height  #层高
-                # safe_distance_x_negative_init=config.GrabPointCalculationConfig_170.safe_distance_x_negative_init  #大车左侧安全距离
-                # safe_distance_x_positive_init=config.GrabPointCalculationConfig_170.safe_distance_x_positive_init  #大车右侧安全距离
-                # safe_distance_y_ocean_init=config.GrabPointCalculationConfig_170.safe_distance_y_ocean_init  #海侧安全距离
-                # safe_distance_y_land_init=config.GrabPointCalculationConfig_170.safe_distance_y_land_init  #陆侧安全距离
-                # hatch_depth=config.GrabPointCalculationConfig_170.hatch_depth  # 型深
-                # line_gap=config.GrabPointCalculationConfig_170.line_gap  #线和线之间的间隔
-                # expansion_x_front=config.GrabPointCalculationConfig_170.expansion_x_front  #前四层大车方向（x）外扩系数.
-                # expansion_y_front=config.GrabPointCalculationConfig_170.expansion_y_front  #前四层小车方向（y）外扩系数.
+                # line_width=config.GrabPointCalculationConfig_1601.line_width  #线宽
+                # floor_height=config.GrabPointCalculationConfig_160.floor_height  #层高
+                # safe_distance_x_negative_init=config.GrabPointCalculationConfig_160.safe_distance_x_negative_init  #大车左侧安全距离
+                # safe_distance_x_positive_init=config.GrabPointCalculationConfig_160.safe_distance_x_positive_init  #大车右侧安全距离
+                # safe_distance_y_ocean_init=config.GrabPointCalculationConfig_160.safe_distance_y_ocean_init  #海侧安全距离
+                # safe_distance_y_land_init=config.GrabPointCalculationConfig_160.safe_distance_y_land_init  #陆侧安全距离
+                # hatch_depth=config.GrabPointCalculationConfig_160.hatch_depth  # 型深
+                # line_gap=config.GrabPointCalculationConfig_160.line_gap  #线和线之间的间隔
+                # expansion_x_front=config.GrabPointCalculationConfig_160.expansion_x_front  #前四层大车方向（x）外扩系数.
+                # expansion_y_front=config.GrabPointCalculationConfig_160.expansion_y_front  #前四层小车方向（y）外扩系数.
                 
-                # expansion_x_back=config.GrabPointCalculationConfig_170.expansion_x_back  #后四层大车方向（x）外扩系数.
-                # expansion_y_back=config.GrabPointCalculationConfig_170.expansion_y_back  #后四层小车方向（y）外扩系数.
-                # block_width=config.GrabPointCalculationConfig_170.block_width  #每个分块的宽度
-                # block_length=config.GrabPointCalculationConfig_170.block_length  #每个分块的长度    
-                # plane_threshold=config.GrabPointCalculationConfig_170.plane_threshold  #平面阈值
-                # plane_distance=config.GrabPointCalculationConfig_170.plane_distance  #平面的情况抓取点移动的距离
-                # bevel_distance=config.GrabPointCalculationConfig_170.bevel_distance  #斜面的情况抓取点移动的距离
-                # retain_height=config.GrabPointCalculationConfig_170.retain_height  #保留高度
-                # Sign=config.GrabPointCalculationConfig_170.Sign  #使用线性函数
-                # k=config.GrabPointCalculationConfig_170.k  #线性函数的斜率
-                # b=config.GrabPointCalculationConfig_170.b  #线性函数的截距
+                # expansion_x_back=config.GrabPointCalculationConfig_160.expansion_x_back  #后四层大车方向（x）外扩系数.
+                # expansion_y_back=config.GrabPointCalculationConfig_160.expansion_y_back  #后四层小车方向（y）外扩系数.
+                # block_width=config.GrabPointCalculationConfig_160.block_width  #每个分块的宽度
+                # block_length=config.GrabPointCalculationConfig_160.block_length  #每个分块的长度    
+                # plane_threshold=config.GrabPointCalculationConfig_160.plane_threshold  #平面阈值
+                # plane_distance=config.GrabPointCalculationConfig_160.plane_distance  #平面的情况抓取点移动的距离
+                # bevel_distance=config.GrabPointCalculationConfig_160.bevel_distance  #斜面的情况抓取点移动的距离
+                # retain_height=config.GrabPointCalculationConfig_160.retain_height  #保留高度
+                # Sign=config.GrabPointCalculationConfig_160.Sign  #使用线性函数
+                # k=config.GrabPointCalculationConfig_160.k  #线性函数的斜率
+                # b=config.GrabPointCalculationConfig_160.b  #线性函数的截距
 
                 line_width=header_info.get('lineWidth',4)  #线宽
                 floor_height=header_info.get('floorHeight',2)  #层高
@@ -411,6 +412,8 @@ async def main():
 
 
 
+
+                
 
 
 
@@ -474,7 +477,7 @@ async def main():
                 y_front=min(points_world[1][1],points_world[2][1])
                 y_back=max(points_world[0][1],points_world[3][1])
                 
-                y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
+                y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
                 y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                 y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
                 logger.info(f"x_positive为：{x_positive}")
@@ -575,43 +578,7 @@ async def main():
                 
 
 
-                
-                # #定义一个函数，用来获取下一条线
-                # def get_next_line(current_line, direction, line_numbers, tried_lines=None):
-                #     line_numbers = sorted(line_numbers)  # 确保从小到大
-                #     min_line = line_numbers[0]
-                #     max_line = line_numbers[-1]
-                #     total_lines = len(line_numbers)
-                    
-                #     if tried_lines is None:
-                #         tried_lines = set()
-                    
-                #     # 如果总线数大于3条，使用新的换线策略
-                #     if total_lines > 3:
-                #         # 最左边的线的右边第一条线（第2条线）优先向左侧换线
-                #         if current_line == min_line + 1 and (current_line - 1) not in tried_lines:  # 第2条线且左边未尝试
-                #             next_line = current_line - 1
-                #             direction = -1
-                #         # 最右边的线的左边第一条线（倒数第2条线）优先向右侧换线
-                #         elif current_line == max_line - 1 and (current_line + 1) not in tried_lines:  # 倒数第2条线且右边未尝试
-                #             next_line = current_line + 1
-                #             direction = 1
-                #         else:
-                #             # 其他情况或优先方向已尝试过，使用原有逻辑
-                #             next_line = current_line + direction
-                #             # 到达边界时反向
-                #             if next_line < min_line or next_line > max_line:
-                #                 direction *= -1
-                #                 next_line = current_line + direction
-                #     else:
-                #         # 总线数不大于3条时，保持原有逻辑
-                #         next_line = current_line + direction
-                #         # 到达边界时反向
-                #         if next_line < min_line or next_line > max_line:
-                #             direction *= -1
-                #             next_line = current_line + direction
-                
-                #     return next_line, direction
+              
                 
                 #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
                 current_line_height=line_heights_dict[current_line]
@@ -671,24 +638,22 @@ async def main():
                                   break
                       if len(tried_lines)==total_lines and need_change_line:
                         work_completed=True
-
-
-                    #异步启动船舱深度测量，不阻塞后续计算
+                        # 异步启动船舱深度测量，不阻塞后续计算
                         try:
-                            # 保存煤堆点云数据到临时文件，使用进程ID区分
-                            process_id = "170"
-                            temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
-                            np.save(temp_data_file, world_coal_pile_points)
-                            logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
-                            
-                            # 启动measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
-                            script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
-                            subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
-                            # 在需要使用舱底深度的地方
+                              # 保存煤堆点云数据到临时文件，使用进程ID区分
+                              process_id = "160"
+                              temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
+                              np.save(temp_data_file, world_coal_pile_points)
+                              logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
+                              
+                              # 启动measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
+                              script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
+                              subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                              logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
 
                         except Exception as e:
-                            logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
+                              logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
+
 
                         #抛出一个指定的异常
                         raise Exception("换线失败，已经尝试过所有的线，作业结束")
@@ -705,13 +670,13 @@ async def main():
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
 
-                limited_layers=config.GrabPointCalculationConfig_170.limited_layers
-                limited_height=hatch_height-(config.GrabPointCalculationConfig_170.limited_height*floor_height)
-                x_dump_truck=config.GrabPointCalculationConfig_170.x_dump_truck
-                y_dump_truck=config.GrabPointCalculationConfig_170.y_dump_truck
-                limited_change_height=config.GrabPointCalculationConfig_170.limited_change_height
-                limited_layers_y_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_y_dump_truck
-                limited_layers_x_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_x_dump_truck
+                limited_layers=config.GrabPointCalculationConfig_160.limited_layers
+                limited_height=hatch_height-(config.GrabPointCalculationConfig_160.limited_height*floor_height)
+                x_dump_truck=config.GrabPointCalculationConfig_160.x_dump_truck
+                y_dump_truck=config.GrabPointCalculationConfig_160.y_dump_truck
+                limited_change_height=config.GrabPointCalculationConfig_160.limited_change_height
+                limited_layers_y_dump_truck=config.GrabPointCalculationConfig_160.limited_layers_y_dump_truck
+                limited_layers_x_dump_truck=config.GrabPointCalculationConfig_160.limited_layers_x_dump_truck
 
 
                 
@@ -875,9 +840,7 @@ async def main():
                 
             except Exception as e:
                 # 记录异常但不退出循环
-                
-
-                
+                                
                 if "换线失败" in str(e):
                     logger.error(f"换线失败，已经尝试过所有的线，作业结束")
                     #发给java后台的数据,，type=4 表示作业结束，没有可以作业的线
@@ -896,7 +859,7 @@ async def main():
                         'capture_point_layer_min_height': 0.0,
                         'capture_point2_layer_min_height': 0.0,
                         'current_hatch': int(current_hatch),
-                        'current_unLoadShip':3
+                        'current_unLoadShip':4
                     }
                
                     #发送给我连接的java服务器
@@ -908,13 +871,14 @@ async def main():
                     await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
 
                     time.sleep(5)
-                    depth_result = get_bottom_depth_result(process_id="170", current_hatch=current_hatch)
+                    depth_result = get_bottom_depth_result(process_id="160", current_hatch=current_hatch)
                     if depth_result:
                         bottom_depth = depth_result['bottom_depth']
                         is_depth_valid = depth_result['is_valid']
                         
                         if is_depth_valid:
                         
+
                             hatch_depth_data={
                             'type':5,
                             'current_hatch': int(current_hatch),
@@ -929,7 +893,6 @@ async def main():
 
                     else:
                         logger.info("暂未获取到舱底深度数据")
-
 
                 else:
                     # 检查是否为WebSocket相关异常
@@ -956,7 +919,7 @@ async def main():
                             'capture_point_layer_min_height': 0.0,
                             'capture_point2_layer_min_height': 0.0,
                             'current_hatch': int(current_hatch),
-                            'current_unLoadShip':3
+                            'current_unLoadShip':4
                         }
                 
                         # 发送给我连接的java服务器
@@ -994,7 +957,7 @@ async def main():
                     'capture_point_layer_min_height': float(capture_point_layer_min_height),
                     'capture_point2_layer_min_height':float(capture_point2_layer_min_height),
                     'current_hatch': int(current_hatch),
-                    'current_unLoadShip':3
+                    'current_unLoadShip':4
                 }
                
                 #发送给我连接的java服务器
@@ -1004,6 +967,7 @@ async def main():
                 print(f"发送给java后台的数据:{to_java_data}")
                 await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
                 print(f"煤堆数据已广播到所有连接的客户端")
+            
 
 
 
