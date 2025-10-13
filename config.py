@@ -77,14 +77,14 @@ class GrabPointCalculationConfig_170:
     # 粗过滤coarse_filtration_point_cloud函数的参数
     x_initial_threshold=10.0 
     x_stat_percentage=0.3
-    x_filter_offset=8
-    intensity_threshold=11.0 #强度
+    x_filter_offset=3
+    intensity_threshold=10.0 #强度
     x_upper_bound_adjustment=0
 
     # 矩形检测find_rectangle_by_histogram_method函数的参数
     pixel_size=0.1 #栅格化大小
     kernel_size=18  #核大小
-    white_threshold=0.35  #白色像素的比例
+    white_threshold=0.4  #白色像素的比例
 
 
 
@@ -120,6 +120,12 @@ class GrabPointCalculationConfig_170:
 
 
     y_grab_expansion=3.1    #海陆侧向外多延申的距离
+
+
+    #分割海陆侧的参数
+    land_to_centerline=2  #距离中心线的距离阈值，判断是否在陆侧
+    ocean_to_centerline=2  #距离中心线的距离阈值，判断是否在海侧
+
 
 
 
@@ -187,14 +193,14 @@ class GrabPointCalculationConfig_160:
     # 粗过滤coarse_filtration_point_cloud函数的参数
     x_initial_threshold=10.0 
     x_stat_percentage=0.3
-    x_filter_offset=8
-    intensity_threshold=11.0 #强度
+    x_filter_offset=3
+    intensity_threshold=10.0 #强度
     x_upper_bound_adjustment=0
 
     # 矩形检测find_rectangle_by_histogram_method函数的参数
     pixel_size=0.1 #栅格化大小
     kernel_size=18  #核大小
-    white_threshold=0.35  #白色像素的比例
+    white_threshold=0.4  #白色像素的比例
 
 
 
