@@ -197,18 +197,18 @@ def coarse_filtration_point_cloud(
         return np.array([])
 
 
-    # 去除X坐标最大的20%的点
-    remove_count = int(len(points) * 0.2)
+    # 去除X坐标最大的40%的点
+    remove_count = int(len(points) * 0.4)
     
     if remove_count > 0:
         # 使用argpartition找到X坐标最大的20%的点的索引
         largest_x_indices = np.argpartition(points[:, 0], -remove_count)[-remove_count:]
         
-        # 创建掩码，保留不在最大20%中的点
+        # 创建掩码，保留不在最大40%中的点
         keep_mask = np.ones(len(points), dtype=bool)
         keep_mask[largest_x_indices] = False
         
-        # 应用掩码过滤点云，保留80%的点
+        # 应用掩码过滤点云，保留60%的点
         points = points[keep_mask]
     # --- 2. 预过滤: 基于X坐标（深度）和强度 ---
     # 统计X坐标最大的 X_STAT_PERCENTAGE 比例个点的平均值作为基准X (avg_largest_x)
@@ -1864,20 +1864,20 @@ def refine_x_coordinates_by_advanced_search(full_original_points_with_intensity,
         points_in_region = np.array(region['points'])
         edge_idx = region['edge_idx']
         
-        if len(points_in_region) > 20:
+        if len(points_in_region) > 120:
             # 点数充足时使用统计筛选策略
             x_coords = points_in_region[:, 0]
             sorted_x = np.sort(x_coords)
 
-            if len(sorted_x) > 8:
-                # 去除最小的8个点（可能的噪声点）
-                filtered_x = sorted_x[8:]
-                if len(filtered_x) >= 7:
-                    # 使用接下来最小的7个点计算平均值
-                    selected_x = filtered_x[:7]
+            if len(sorted_x) > 50:
+                # 去除最小的50个点（可能的噪声点）
+                filtered_x = sorted_x[50:]
+                if len(filtered_x) >= 50:
+                    # 使用接下来最小的50个点计算平均值
+                    selected_x = filtered_x[:50]
                     avg_x = np.mean(selected_x)
                     edge_x_mapping[edge_idx] = avg_x
-                    # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，筛选后取最小7点平均x坐标: {avg_x:.3f}")
+                    # print(f"短边 {edge_idx}: 找到 {len(points_in_region)} 个点，筛选后取最小50点平均x坐标: {avg_x:.3f}")
                 else:
                     # 筛选后点数不足时使用全部筛选点
                     avg_x = np.mean(filtered_x)
@@ -2321,7 +2321,7 @@ class WebSocketManager:
         while self.max_reconnect_attempts == -1 or attempts < self.max_reconnect_attempts:
             try:
                 print(f"尝试连接到 WebSocket 服务器: {self.uri} (第{attempts + 1}次)")
-                self.websocket = await websockets.connect(self.uri, max_size=8 * 1024 * 1024)
+                self.websocket = await websockets.connect(self.uri, max_size=1024 * 1024 * 1024)
                 self.is_connected = True
                 print("WebSocket连接成功！")
                 return True
@@ -2735,7 +2735,7 @@ class CoalPileBroadcastServer:
             self.register_client,
             self.host,
             self.port,
-            max_size=10 * 1024 * 1024,  # 10MB最大消息大小
+            max_size=1024 * 1024 * 1024,  # 1024MB最大消息大小
             ping_interval=20,  # 20秒ping间隔
             ping_timeout=10    # 10秒ping超时
         )
@@ -3108,14 +3108,18 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     else:
         if avg_height >= above_current_line_layer_min_height:
             avg_height = above_current_line_layer_min_height
-            logger.info(f"高于当前线所在层的上1.5层的最低高度，高度设置为{above_current_line_layer_min_height}")
+            logger.info(f"高于大车方向甩斗限制的最低高度，高度设置为{above_current_line_layer_min_height}")
 
     # 计算抓取点处于哪一层
     capture_point_layer = math.ceil(abs(hatch_height - avg_height) / floor_height)
     
     # 创建抓取点字典
     capture_point = {'x': float(avg_x), 'y': float(avg_y), 'z': float(avg_height)}
-    logger.info(f"未处理前抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={best_avg_height:.3f}")
+    if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+        logger.info(f"未处理前抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={max_height:.3f}")
+    else:
+        logger.info(f"未处理前抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={best_avg_height:.3f}")
+
     logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
     
     return capture_point,capture_point_layer
