@@ -48,7 +48,7 @@ logging.getLogger('websockets.server').setLevel(logging.CRITICAL)
 
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-log_file_path = os.path.join(log_dir, "hatch_coal_170.log")
+log_file_path = os.path.join(log_dir, "hatch_coal_170_zs.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -273,6 +273,12 @@ async def main():
                   #比较世界坐标系下的舱口坐标和上一次的舱口坐标是否合理points_world和world_coords_refined
                     if VISUALIZE_FINAL_RESULT:
                         visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
+
+                    #logger记录points_world和world_coords_refined的值
+                    logger.info(f"第{header_info.get('current_hatch', 0)}号舱的识别舱口坐标为：{points_world}")
+                    logger.info(f"第{header_info.get('current_hatch', 0)}号舱的上一次识别舱口坐标为：{world_coords_refined}")
+
+
                     points_world=world_coords_refined
                     hatch_corners_refined=np.array([
                     [hatch_corners['corner1']['x'], hatch_corners['corner1']['y'], hatch_corners['corner1']['z']],
