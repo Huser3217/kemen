@@ -152,7 +152,7 @@ async def main():
                 last_machine_position = header_info.get('last_machine_position', 0) 
                 current_machine_position = header_info.get('current_machine_position', {})
                 last_capture_point = header_info.get('last_capture_point', {})
-                
+                mode_flag = header_info.get('mode_flag', 0)
                 
                 last_capture_point_x = last_capture_point.get('x', 0)
                 last_capture_point_y = last_capture_point.get('y', 0)
@@ -753,6 +753,9 @@ async def main():
                         y_dump_truck=y_dump_truck,
                         limited_change_height=limited_change_height,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
+                        mode_flag=mode_flag,
+                        land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
+                        ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
                         logger=logger
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
@@ -790,6 +793,9 @@ async def main():
                         y_dump_truck=y_dump_truck,
                         limited_change_height=limited_change_height,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
+                        mode_flag=mode_flag,
+                        land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
+                        ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
                         logger=logger
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
@@ -831,6 +837,9 @@ async def main():
                             y_dump_truck=y_dump_truck,
                             limited_change_height=limited_change_height,
                             above_current_line_layer2_min_height=above_current_line_layer2_min_height,
+                            mode_flag=mode_flag,
+                            land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
+                            ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
                             logger=logger
                                 )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
@@ -979,7 +988,8 @@ async def main():
                     'capture_point_layer_min_height': float(capture_point_layer_min_height),
                     'capture_point2_layer_min_height':float(capture_point2_layer_min_height),
                     'current_hatch': int(current_hatch),
-                    'current_unLoadShip':3
+                    'current_unLoadShip':3,
+                    'mode_flag':mode_flag,
                 }
                
                 #发送给我连接的java服务器

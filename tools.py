@@ -2410,7 +2410,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
                 magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
                 last_machine_position,
                 current_machine_position,
-                current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,
+                current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,mode_flag,
                 #上次抓取点的坐标
                 last_capture_point_x, last_capture_point_y, last_capture_point_z,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
@@ -2448,6 +2448,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  Number of Points: {num_points}")
     print(f"  Last Machine Position: {last_machine_position}")
     print(f"  Current Machine Position: {current_machine_position}")
+    print(f"  Mode Flag: {mode_flag}")
     print(f"  Last Capture Point: ({last_capture_point_x:.3f}, {last_capture_point_y:.3f}, {last_capture_point_z:.3f})")
     print(f"  Corner1: ({corner1_x:.3f}, {corner1_y:.3f}, {corner1_z:.3f})")
     print(f"  Corner2: ({corner2_x:.3f}, {corner2_y:.3f}, {corner2_z:.3f})")
@@ -2520,6 +2521,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
             'current_hatch': current_hatch,
             'current_step': current_step,
             'num_points': num_points,
+            'mode_flag': mode_flag,
             #上次抓取点的坐标
             'last_capture_point': {'x': last_capture_point_x, 'y': last_capture_point_y, 'z': last_capture_point_z},
             'hatch_corners': {
@@ -2836,7 +2838,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,logger):
+                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger):
     """
     计算抓取点的核心函数
     
@@ -2933,22 +2935,23 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
             # 计算当前分块的面积
             block_area = block_width * (y_max_block - y_min_block)
+            if mode_flag!=2 and mode_flag!=3: #海陆侧抓取模式
 
-            # 计算分块与排除区域的交集面积
-            overlap_x_min = max(x_min_block, remove_x_negative)
-            overlap_x_max = min(x_max_block, remove_x_positive)
-            overlap_y_min = max(y_min_block, remove_y_negative)
-            overlap_y_max = min(y_max_block, remove_y_positive)
-            
-            # 判断是否有交集
-            if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                overlap_ratio = overlap_area / block_area
-                # 如果当前分块有30%以上的范围落入了排除区域，就将这个分块的平均高度设置为999
-                if overlap_ratio >= 0.3:
-                    current_line_points_blocks_heights[(i, j)] = 999
-                    logger.info(f"分块({i},{j})与排除区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-                    continue
+                # 计算分块与排除区域的交集面积
+                overlap_x_min = max(x_min_block, remove_x_negative)
+                overlap_x_max = min(x_max_block, remove_x_positive)
+                overlap_y_min = max(y_min_block, remove_y_negative)
+                overlap_y_max = min(y_max_block, remove_y_positive)
+                
+                # 判断是否有交集
+                if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
+                    overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
+                    overlap_ratio = overlap_area / block_area
+                    # 如果当前分块有30%以上的范围落入了排除区域，就将这个分块的平均高度设置为999
+                    if overlap_ratio >= 0.3:
+                        current_line_points_blocks_heights[(i, j)] = 999
+                        logger.info(f"分块({i},{j})与排除区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
+                        continue
 
             # 提取当前分块的点云
             current_line_points_block = current_line_points[
@@ -2974,9 +2977,80 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     # 打印存储的分块高度
     for (i, j), height in current_line_points_blocks_heights.items():
         logger.info(f"分块({i},{j})的高度为：{height}")
-    
+        
     # 选取连续的面积为24的块，统计这些块的平均高度值
     window_size = 6
+
+    if mode_flag==2 or mode_flag==3: #海陆侧抓取模式
+    #将划分的这些行，分成两个区域，一个是陆侧，一个是海侧，偶数的话将这些行平均分成两半，奇数的话将这些行平均分成两半，但是多出来的那一行，作为陆侧的，然后将海陆侧的间隔坐标作为中心线
+        if n_y % 2 == 0:
+            land_start = 0
+            separate = n_y // 2
+            ocean_start=separate+(ocean_to_centerline//block_width)
+            land_end=separate-(land_to_centerline//block_width)-1
+            ocean_end=n_y-1
+            logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})，海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
+        
+        else:
+            land_start = 0
+            separate= n_y // 2 + 1
+            ocean_start=separate+(ocean_to_centerline//block_width)
+            land_end=separate-(land_to_centerline//block_width)-1
+            ocean_end=n_y-1
+            logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})，海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
+        
+        if mode_flag==2: #海侧抓取模式
+
+            if ocean_end-ocean_start+1<window_size:
+                logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size})，无法进行抓取")
+                logger.info(f"直接从中心线分海陆侧区域")
+                ocean_start=separate
+                logger.info(f"海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
+                if ocean_end-ocean_start+1<window_size:
+                    logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size})，无法进行抓取")
+                    logger.info(f"直接从最海侧取一个抓取点")
+                    ocean_start=ocean_end-window_size+1
+                    logger.info(f"海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
+
+
+
+            
+
+            #current_line_points_blocks_heights中只保留属于海侧的块的高度，不属于海侧的其他块的高度设为999
+            for i in range(n_y):
+                for j in range(n_x):
+                    # 检查该块是否在海侧范围内
+                    if i < ocean_start or i > ocean_end:
+                        # 不在海侧范围内，将高度设为999
+                        current_line_points_blocks_heights[(i, j)] = 999
+                        logger.info(f"分块({i},{j})不在海侧范围内，设置高度为999")
+
+        if mode_flag==3: #陆侧抓取模式
+            if land_end-land_start+1<window_size:
+                logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size})，无法进行抓取")
+                logger.info(f"直接从中心线分海陆侧区域")
+                land_end=separate-1
+                logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})")
+                if land_end-land_start+1<window_size:
+                    logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size})，无法进行抓取")
+                    logger.info(f"直接从最陆侧取一个抓取点")
+                    land_end=land_start+window_size-1
+                    logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})")
+
+
+            
+            #current_line_points_blocks_heights中只保留属于陆侧的块的高度，不属于陆侧的其他块的高度设为999
+            for i in range(n_y):
+                for j in range(n_x):
+                    # 检查该块是否在陆侧范围内
+                    if i < land_start or i > land_end:
+                        # 不在陆侧范围内，将高度设为999
+                        current_line_points_blocks_heights[(i, j)] = 999
+                        logger.info(f"分块({i},{j})不在陆侧范围内，设置高度为999")
+    
+            
+
+
     
     # 遍历所有可能的起点
     best_start_y = None
