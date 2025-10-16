@@ -2833,7 +2833,86 @@ def world_to_lidar_with_x(points_world, translation, rotation_angles=[0, 0, 0], 
     
     return points_lidar.T
 
-def calculate_capture_point(world_coal_pile_points, lines_dict, current_line, 
+
+
+
+def process_blocks_for_line(blocks_heights, world_coal_pile_points, lines_dict, 
+                            y_land, y_ocean,
+                             block_width, block_length,
+                            enable_limited_flag, logger):
+    """
+    对当前线进行点云分块处理，并更新 blocks_heights 字典
+
+    Args:
+        blocks_heights: 用于存储所有分块高度的字典
+        world_coal_pile_points: 世界坐标系下的煤堆点云
+        lines_dict: 线段字典
+        current_line: 当前线段
+        y_land, y_ocean: 陆地和海洋侧Y坐标
+        hatch_height: 舱口高度
+        current_line_height: 当前线高度
+        floor_height: 层高
+        block_width, block_length: 分块尺寸
+        exclude_x_center, exclude_y_center, exclude_radius: 排除区域参数
+        enable_limited_flag: 是否启用边界限制
+        logger: 日志记录器
+    """
+    for current_line in lines_dict:
+
+        current_line_points = world_coal_pile_points[
+            (world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & 
+            (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])
+        ]
+        current_line_points = current_line_points[
+            (current_line_points[:, 1] <= y_ocean) & 
+            (current_line_points[:, 1] >= y_land)
+        ]
+
+
+        x_min, x_max = lines_dict[current_line]
+        y_min, y_max = y_land, y_ocean
+
+        original_n_y = int(floor((y_max - y_min) / block_length))
+        original_n_x = int(floor((x_max - x_min) / block_width))
+
+        if enable_limited_flag:
+            remaining_y = (y_max - y_min) - original_n_y * block_length
+            n_y = original_n_y + (1 if remaining_y > 0.1 else 0)
+            n_x = original_n_x
+        else:
+            n_y = original_n_y
+            n_x = original_n_x
+
+        logger.info(f"线 {current_line} 的总块数为：{n_y * n_x}")
+
+        for i in range(n_y):
+            for j in range(n_x):
+                x_min_block = x_min + j * block_width
+                x_max_block = x_min + (j + 1) * block_width
+                y_min_block = y_min + i * block_length
+                y_max_block = y_min + (i + 1) * block_length
+
+                if enable_limited_flag and i == n_y - 1 and remaining_y > 0.1:
+                    y_max_block = y_max
+
+                current_line_points_block = current_line_points[
+                    (current_line_points[:, 0] >= x_min_block) & 
+                    (current_line_points[:, 0] <= x_max_block) & 
+                    (current_line_points[:, 1] >= y_min_block) & 
+                    (current_line_points[:, 1] <= y_max_block)
+                ]
+
+                if len(current_line_points_block) > 0:
+                    current_line_points_block_height = current_line_points_block[:, 2].mean()
+                else:
+                    current_line_points_block_height = np.nan
+                    logger.warning(f"线 {current_line} 的分块({i},{j})没有找到点云数据，设置高度为NaN")
+
+                blocks_heights[(i, j+(current_line-1)*n_x)] = current_line_points_block_height
+
+
+
+def calculate_capture_point(blocks_heights,world_coal_pile_points, lines_dict, current_line, 
                           exclude_x_center, exclude_y_center, exclude_radius,x_left,x_right,y_front,y_back,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
@@ -2935,24 +3014,6 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
             # 计算当前分块的面积
             block_area = block_width * (y_max_block - y_min_block)
-            if mode_flag!=2 and mode_flag!=3: #海陆侧抓取模式
-
-                # 计算分块与排除区域的交集面积
-                overlap_x_min = max(x_min_block, remove_x_negative)
-                overlap_x_max = min(x_max_block, remove_x_positive)
-                overlap_y_min = max(y_min_block, remove_y_negative)
-                overlap_y_max = min(y_max_block, remove_y_positive)
-                
-                # 判断是否有交集
-                if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
-                    overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
-                    overlap_ratio = overlap_area / block_area
-                    # 如果当前分块有30%以上的范围落入了排除区域，就将这个分块的平均高度设置为999
-                    if overlap_ratio >= 0.3:
-                        current_line_points_blocks_heights[(i, j)] = 999
-                        logger.info(f"分块({i},{j})与排除区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
-                        continue
-
             # 提取当前分块的点云
             current_line_points_block = current_line_points[
                 (current_line_points[:, 0] >= x_min_block) & 
@@ -2973,10 +3034,29 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
             
             # 将当前分块的高度存到字典中
             current_line_points_blocks_heights[(i, j)] = current_line_points_block_height
+            blocks_heights[(i, j)] = current_line_points_block_height
+            
+            if mode_flag!=2 and mode_flag!=3: #海陆侧抓取模式
 
-    # 打印存储的分块高度
-    for (i, j), height in current_line_points_blocks_heights.items():
-        logger.info(f"分块({i},{j})的高度为：{height}")
+                # 计算分块与排除区域的交集面积
+                overlap_x_min = max(x_min_block, remove_x_negative)
+                overlap_x_max = min(x_max_block, remove_x_positive)
+                overlap_y_min = max(y_min_block, remove_y_negative)
+                overlap_y_max = min(y_max_block, remove_y_positive)
+                
+                # 判断是否有交集
+                if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
+                    overlap_area = (overlap_x_max - overlap_x_min) * (overlap_y_max - overlap_y_min)
+                    overlap_ratio = overlap_area / block_area
+                    # 如果当前分块有30%以上的范围落入了排除区域，就将这个分块的平均高度设置为999
+                    if overlap_ratio >= 0.3:
+                        current_line_points_blocks_heights[(i, j)] = 999
+                        logger.info(f"分块({i},{j})与排除区域重叠比例为 {overlap_ratio:.2f}，设置高度为999")
+                        continue
+
+
+
+
         
     # 选取连续的面积为24的块，统计这些块的平均高度值
     window_size = 6
@@ -3049,7 +3129,9 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                         logger.info(f"分块({i},{j})不在陆侧范围内，设置高度为999")
     
             
-
+    # 打印存储的分块高度
+    for (i, j), height in current_line_points_blocks_heights.items():
+        logger.info(f"分块({i},{j})的高度为：{height}")
 
     
     # 遍历所有可能的起点
@@ -3088,6 +3170,12 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                 # 打印当前最佳块
                 logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
 
+    # 检查是否找到了最佳结果
+    if best_blocks is None or best_avg_height == -np.inf:
+        error_msg = "未找到最佳结果，所有可能的窗口都包含无效高度或没有有效数据"
+        logger.error(error_msg)
+        raise Exception(error_msg)
+    
     # 打印最佳块
     logger.info(f"最佳块: {best_blocks}，平均高度: {best_avg_height}")
     
