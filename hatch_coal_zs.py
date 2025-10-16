@@ -714,7 +714,7 @@ async def main():
                 #小车方向甩斗的高度限制
                 above_current_line_layer2=current_line_layer-limited_layers_y_dump_truck
                 above_current_line_layer2_min_height=hatch_height-(above_current_line_layer2*floor_height)
-                
+                blocks_heights={}
                 need_calculate_two=False
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
                     need_calculate_two=True
@@ -722,6 +722,7 @@ async def main():
                 if need_calculate_two:
                     # 计算第一个抓取点
                     capture_point, capture_point_layer = calculate_capture_point(
+                        blocks_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         lines_dict=lines_dict,
                         current_line=current_line,
@@ -757,11 +758,13 @@ async def main():
                         land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
                         ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
                         logger=logger
+                       
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
                     capture_point_effective=1
                     # 计算第二个抓取点，排除第一个抓取点的区域
                     capture_point2, capture_point2_layer = calculate_capture_point(
+                        blocks_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         lines_dict=lines_dict,
                         current_line=current_line,
@@ -806,6 +809,7 @@ async def main():
                     capture_point_effective=0
                     capture_point_layer_min_height=0
                     capture_point2,capture_point2_layer=calculate_capture_point(
+                            blocks_heights,
                             world_coal_pile_points=world_coal_pile_points,
                             lines_dict=lines_dict,
                             current_line=current_line,
@@ -848,8 +852,22 @@ async def main():
                     #   capture_point2['x']=capture_point['x']
                         
                 
+                # print(f'blocks_heights={blocks_heights}')
+                #将blocks_heights转换为二维列表，原来字典的键变为索引ij
+                blocks_heights_list = []
+                # 获取所有的i和j值
+                i_values = sorted(set([key[0] for key in blocks_heights.keys()]))
+                j_values = sorted(set([key[1] for key in blocks_heights.keys()]))
                 
-                
+                # 创建二维列表
+                for i in i_values:
+                    row = []
+                    for j in j_values:
+                        if (i, j) in blocks_heights:
+                            row.append(blocks_heights[(i, j)])
+                        else:
+                            row.append(None)  # 如果没有对应的键，填充None
+                    blocks_heights_list.append(row)
                 
                 
                 
@@ -949,6 +967,7 @@ async def main():
                             'capture_point2_layer': 0,
                             'capture_point_layer_min_height': 0.0,
                             'capture_point2_layer_min_height': 0.0,
+                            
                             'current_hatch': int(current_hatch),
                             'current_unLoadShip':3
                         }
@@ -990,6 +1009,7 @@ async def main():
                     'current_hatch': int(current_hatch),
                     'current_unLoadShip':3,
                     'mode_flag':mode_flag,
+                    'blocks_heights':blocks_heights_list,
                 }
                
                 #发送给我连接的java服务器
