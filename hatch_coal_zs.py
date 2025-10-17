@@ -715,6 +715,12 @@ async def main():
                 above_current_line_layer2=current_line_layer-limited_layers_y_dump_truck
                 above_current_line_layer2_min_height=hatch_height-(above_current_line_layer2*floor_height)
                 blocks_heights={}
+                process_blocks_for_line(
+
+
+                )
+
+
                 need_calculate_two=False
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
                     need_calculate_two=True
@@ -722,7 +728,6 @@ async def main():
                 if need_calculate_two:
                     # 计算第一个抓取点
                     capture_point, capture_point_layer = calculate_capture_point(
-                        blocks_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         lines_dict=lines_dict,
                         current_line=current_line,
@@ -764,7 +769,6 @@ async def main():
                     capture_point_effective=1
                     # 计算第二个抓取点，排除第一个抓取点的区域
                     capture_point2, capture_point2_layer = calculate_capture_point(
-                        blocks_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         lines_dict=lines_dict,
                         current_line=current_line,
@@ -809,7 +813,6 @@ async def main():
                     capture_point_effective=0
                     capture_point_layer_min_height=0
                     capture_point2,capture_point2_layer=calculate_capture_point(
-                            blocks_heights,
                             world_coal_pile_points=world_coal_pile_points,
                             lines_dict=lines_dict,
                             current_line=current_line,

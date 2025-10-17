@@ -2908,11 +2908,11 @@ def process_blocks_for_line(blocks_heights, world_coal_pile_points, lines_dict,
                     current_line_points_block_height = np.nan
                     logger.warning(f"线 {current_line} 的分块({i},{j})没有找到点云数据，设置高度为NaN")
 
-                blocks_heights[(i, j+(current_line-1)*n_x)] = current_line_points_block_height
+                blocks_heights[(i, j+( -1)*n_x)] = current_line_points_block_height
 
 
 
-def calculate_capture_point(blocks_heights,world_coal_pile_points, lines_dict, current_line, 
+def calculate_capture_point(world_coal_pile_points, lines_dict, current_line, 
                           exclude_x_center, exclude_y_center, exclude_radius,x_left,x_right,y_front,y_back,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
@@ -3034,7 +3034,7 @@ def calculate_capture_point(blocks_heights,world_coal_pile_points, lines_dict, c
             
             # 将当前分块的高度存到字典中
             current_line_points_blocks_heights[(i, j)] = current_line_points_block_height
-            blocks_heights[(i, j)] = current_line_points_block_height
+
             
             if mode_flag!=2 and mode_flag!=3: #海陆侧抓取模式
 
