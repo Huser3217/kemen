@@ -2395,15 +2395,90 @@ class WebSocketManager:
             return False
 
 
+def parse_extensions(extension_data: bytes):
+    """
+    解析扩展区数据，支持TLV格式
+    返回: ({tag: parsed_data}, offset)
+    """
+    extensions = {}
+    offset = 0
+    
+    while offset < len(extension_data):
+        # 检查是否有足够的数据读取TLV头部 (tag: 2字节, length: 4字节)
+        if offset + 6 > len(extension_data):
+            print(f"警告: 扩展区数据不完整，剩余 {len(extension_data) - offset} 字节")
+            break
+            
+        # 解析TLV头部
+        tag = struct.unpack('<H', extension_data[offset:offset+2])[0]
+        length = struct.unpack('<I', extension_data[offset+2:offset+6])[0]
+        offset += 6
+        
+        # 检查是否有足够的数据读取value
+        if offset + length > len(extension_data):
+            print(f"警告: 扩展区标签 0x{tag:04X} 数据不完整，需要 {length} 字节，剩余 {len(extension_data) - offset} 字节")
+            break
+            
+        # 提取value数据
+        value_data = extension_data[offset:offset+length]
+        offset += length
+        
+        # 根据标签类型解析数据
+        if tag == 0x0101:  # MESH_SELECTION扩展
+            parsed_data = parse_mesh_selection_extension(value_data)
+            extensions[tag] = parsed_data
+        else:
+            # 未知扩展类型，保存原始数据
+            extensions[tag] = {'raw_data': value_data}
+            
+    return extensions, offset
+
+def parse_mesh_selection_extension(value_data: bytes) -> dict:
+    """
+    解析Mesh Selection扩展区数据
+    格式: columnCount(4) + rowCount(4) + selectedCount(4) + 坐标对列表(每对8字节)
+    """
+    if len(value_data) < 12:
+        print("警告: Mesh Selection扩展数据太短")
+        return {}
+        
+    # 解析基本信息
+    column_count = struct.unpack('<I', value_data[0:4])[0]
+    row_count = struct.unpack('<I', value_data[4:8])[0]
+    selected_count = struct.unpack('<I', value_data[8:12])[0]
+    
+    # 解析选中的坐标对
+    selected_positions = []
+    expected_data_len = 12 + selected_count * 8
+    
+    if len(value_data) < expected_data_len:
+        print(f"警告: Mesh Selection坐标数据不完整，需要 {expected_data_len} 字节，实际 {len(value_data)} 字节")
+        return {}
+        
+    for i in range(selected_count):
+        pos_offset = 12 + i * 8
+        col = struct.unpack('<I', value_data[pos_offset:pos_offset+4])[0]
+        row = struct.unpack('<I', value_data[pos_offset+4:pos_offset+8])[0]
+        selected_positions.append({'col': col, 'row': row})
+    
+    return {
+        'columnCount': column_count,
+        'rowCount': row_count,
+        'selectedCount': selected_count,
+        'selectedPositions': selected_positions
+    }
+
+
 async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMAT,POINT_FORMAT):
     """
     解析接收到的二进制点云数据。
+    支持动态头部长度和扩展区数据。
     """
     if len(data) < HEADER_SIZE:
         print(f"数据包太小，无法解析头部。预期最小 {HEADER_SIZE} 字节，收到 {len(data)} 字节。")
         return None
 
-    # 1. 解析头部
+    # 1. 解析固定头部
     try:
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
@@ -2425,7 +2500,9 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
                 world_corner4_x, world_corner4_y, world_corner4_z,
                 lineWidth,floorHeight,safeDistanceXNegativeInit,safeDistanceXPositiveInit,safeDistanceY0ceanInit,safeDistanceYLandInit,
                 hatchDepth,retainHeight,lineGap,expansionXFront,expansionYFront,expansionXBack,expansionYBack,
-                planeThreshold,heightDiff,signFlag,kValue,bValue,planeDistance,bevelDistance,blockWidth,blockLength
+                planeThreshold,heightDiff,signFlag,kValue,bValue,planeDistance,bevelDistance,blockWidth,blockLength,
+                block1_selection,block2_selection,block3_selection,block4_selection,
+                block5_selection,block6_selection,block7_selection,block8_selection,block9_selection
             ) = header_data
     except struct.error as e:
         print(f"解析头部失败: {e}")
@@ -2435,6 +2512,28 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     if magic != b'LPNT':
         logger.warning(f"魔术字不匹配！预期 b'LPNT'，实际 {magic}")
         return None
+
+    # 检查动态头部长度
+    if len(data) < header_len:
+        print(f"数据包太小，无法解析完整头部。预期 {header_len} 字节，收到 {len(data)} 字节。")
+        return None
+
+    # 2. 解析扩展区（如果存在）
+    extensions = {}
+    header_end = header_len  # 默认用header_len
+    if header_len > HEADER_SIZE:
+        extension_data = data[HEADER_SIZE:header_len]
+        extensions, ext_consumed_len = parse_extensions(extension_data)
+        actual_header_end = HEADER_SIZE + ext_consumed_len
+        if actual_header_end != header_len:
+            print(f"警告: 头部长度字段与TLV实际长度不一致，header_len={header_len}, TLV消费={actual_header_end}")
+        header_end = actual_header_end  # 优先使用TLV实际消费的长度
+        print(f"解析到 {len(extensions)} 个扩展区")
+        for tag, ext_data in extensions.items():
+            if tag == 0x0101:  # MESH_SELECTION扩展
+                print(f"  Mesh Selection扩展: 网格 {ext_data['columnCount']}x{ext_data['rowCount']}, 选中 {ext_data['selectedCount']} 个")
+            else:
+                print(f"  未知扩展 0x{tag:04X}: {len(ext_data)} 字节")
 
     print(f"\n--- 解析头部 v{version} ---")
     print(f"  Magic: {magic.decode()}")
@@ -2481,30 +2580,60 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  bevelDistance: {bevelDistance}")
     print(f"  blockWidth: {blockWidth}")
     print(f"  blockLength: {blockLength}")
+    print(f"  block1_selection: {block1_selection}")
+    print(f"  block2_selection: {block2_selection}")
+    print(f"  block3_selection: {block3_selection}")
+    print(f"  block4_selection: {block4_selection}")
+    print(f"  block5_selection: {block5_selection}")
+    print(f"  block6_selection: {block6_selection}")
+    print(f"  block7_selection: {block7_selection}")
+    print(f"  block8_selection: {block8_selection}")
+    print(f"  block9_selection: {block9_selection}")
 
     print("------------------")
 
-    # 2. 解析点数据
+    # 2. 解析点数据（按实际可用字节安全取整）
     points = []
-    payload_data = data[HEADER_SIZE:]
+    payload_data = data[header_end:]  # 使用真实头部结束位置
 
-    for i in range(num_points):
+    # 诊断：检查头部中的点大小与本地格式是否一致
+    point_fmt_size = struct.calcsize(POINT_FORMAT)
+    if point_fmt_size != POINT_SIZE:
+        print(f"警告: 本地POINT_SIZE({POINT_SIZE})与POINT_FORMAT计算({point_fmt_size})不一致")
+
+    if point_size != POINT_SIZE:
+        print(f"警告: 头部point_size({point_size})与客户端POINT_SIZE({POINT_SIZE})不一致")
+
+    payload_len = len(payload_data)
+    expected_by_header = num_points * point_size
+    expected_by_client = num_points * POINT_SIZE
+    available_points = min(num_points, payload_len // POINT_SIZE)
+
+    total_expected = header_end + expected_by_client
+    if len(data) != total_expected:
+        diff = len(data) - total_expected
+        print(f"诊断: 包总长度与期望不一致，len(data)={len(data)} 期望={total_expected} 差值={diff}")
+
+    if payload_len < expected_by_header or payload_len < expected_by_client:
+        print(f"警告: 负载长度不足。payload={payload_len} "
+              f"header期望={expected_by_header} client期望={expected_by_client} "
+              f"可用点数={available_points}/{num_points}")
+
+    for i in range(available_points):
         start_idx = i * POINT_SIZE
         end_idx = start_idx + POINT_SIZE
 
-        if end_idx > len(payload_data):
+        if end_idx > payload_len:
+            # 理论不会触发，因为available_points已按整除截断
             logger.debug(f"警告: 点数据不完整！只解析了 {len(points)} 个点。")
             break
 
         point_bytes = payload_data[start_idx:end_idx]
         try:
             x_raw, y_raw, z_raw, refl, tag = struct.unpack(POINT_FORMAT, point_bytes)
-            
-            # 转换为米
             x_meters = x_raw / 1000.0
             y_meters = y_raw / 1000.0
             z_meters = z_raw / 1000.0
-            
             points.append({'x': x_meters, 'y': y_meters, 'z': z_meters, 'refl': refl, 'tag': tag})
         except struct.error as e:
             logger.debug(f"解析点数据失败，点索引 {i}: {e}")
@@ -2514,6 +2643,8 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     return {
         'header': {
             'version': version,
+            'header_len': header_len,  # 添加动态头部长度
+            'actual_header_end': header_end,  # 添加实际头部结束位置
             'frame_id': frame_id,
             'is_detection_hatch': is_detection_hatch,
             'last_machine_position': last_machine_position,
@@ -2559,9 +2690,15 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
         'bevelDistance': bevelDistance,
         'blockWidth': blockWidth,
         'blockLength': blockLength,
-        
+        'selection_blocks':[
+            block1_selection,block2_selection,block3_selection,block4_selection,
+            block5_selection,block6_selection,block7_selection,block8_selection,block9_selection
+        ],
+        'extensions': extensions,  # 添加扩展区数据
         },
+
         'points': points
+
         
     }
 
@@ -2908,7 +3045,7 @@ def process_blocks_for_line(blocks_heights, world_coal_pile_points, lines_dict,
                     current_line_points_block_height = np.nan
                     logger.warning(f"线 {current_line} 的分块({i},{j})没有找到点云数据，设置高度为NaN")
 
-                blocks_heights[(i, j+( -1)*n_x)] = current_line_points_block_height
+                blocks_heights[(i, j+(current_line-1)*n_x)] = current_line_points_block_height
 
 
 
@@ -2917,7 +3054,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger):
+                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,square_ranges=[],selected_map=[]):
     """
     计算抓取点的核心函数
     
@@ -2925,7 +3062,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         world_coal_pile_points: 世界坐标系下的煤堆点云
         lines_dict: 线段字典
         current_line: 当前线段
-        exclude_x_center: 排除区域中心X坐标
+        exclude_x_center: 排除区域中心X坐标（上次抓取点）
         exclude_y_center: 排除区域中心Y坐标  
         exclude_radius: 排除区域半径
         y_land: 陆地侧Y坐标
@@ -2952,26 +3089,83 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     remove_x_positive = exclude_x_center + exclude_radius
     remove_y_negative = exclude_y_center - exclude_radius
     remove_y_positive = exclude_y_center + exclude_radius
+    mode_flag_4_mode=False#九宫格抓取某条线上的三个块都被选中了
+    if square_ranges and selected_map and mode_flag==4:
+        #判断选中的分块有哪些在这条线上
+        selected_blocks = []
+        for index in selected_map:
+            line=index//3+1
+            if line==current_line:
+                selected_blocks.append(index)
 
-    # 获取当前线的点云
-    current_line_points = world_coal_pile_points[
-        (world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & 
-        (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])
-    ]
-    # 提取在当前线框内且y坐标在安全范围内的点
-    current_line_points = current_line_points[
-        (current_line_points[:, 1] <= y_ocean) & 
-        (current_line_points[:, 1] >= y_land)
-    ]
+        current_capture_block=-1        
+        if(len(selected_blocks)==1):
+            current_capture_block=selected_blocks[0]
+
+        #判断上次抓取点是否在selected_blocks中
+        if len(selected_blocks)==2:
+            if lines_dict[current_line][0]<=exclude_x_center<=lines_dict[current_line][1]:
+                last_capture_block=-1
+                #判断上次抓取点是否在selected_blocks中
+                for block in selected_blocks:
+                    if square_ranges[block]["y_min"]<=exclude_y_center<=square_ranges[block]["y_max"]:
+                        last_capture_block=block   #上次抓取的块
+
+                #现在这个抓取点则在另一块 
+                for block in selected_blocks:
+                    if block!=last_capture_block:
+                        current_capture_block=block   #当前抓取的分块
+            else:
+                current_capture_block=selected_blocks[0]
+
+        if len(selected_blocks)==3:
+            mode_flag_4_mode=True
+        if current_capture_block!=-1:
+                logger.info(f"当前抓取的分块为{current_capture_block+1}")
+                current_line_points = world_coal_pile_points[
+                    (world_coal_pile_points[:, 0] >= square_ranges[current_capture_block]["x_min"]) & 
+                    (world_coal_pile_points[:, 0] <= square_ranges[current_capture_block]["x_max"]) & 
+                    (world_coal_pile_points[:, 1] >= square_ranges[current_capture_block]["y_min"]) & 
+                    (world_coal_pile_points[:, 1] <= square_ranges[current_capture_block]["y_max"])
+                                                                                 ]
+                y_min, y_max = square_ranges[current_capture_block]["y_min"], square_ranges[current_capture_block]["y_max"]
+
+        else:
+                            # 获取当前线的点云
+                current_line_points = world_coal_pile_points[
+                    (world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & 
+                    (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])
+                ]
+                # 提取在当前线框内且y坐标在安全范围内的点
+                current_line_points = current_line_points[
+                    (current_line_points[:, 1] <= y_ocean) & 
+                    (current_line_points[:, 1] >= y_land)
+                ]
+                y_min, y_max = y_land, y_ocean
+
+            
+
+
+    else:
+        # 获取当前线的点云
+        current_line_points = world_coal_pile_points[
+            (world_coal_pile_points[:, 0] >= lines_dict[current_line][0]) & 
+            (world_coal_pile_points[:, 0] <= lines_dict[current_line][1])
+        ]
+        # 提取在当前线框内且y坐标在安全范围内的点
+        current_line_points = current_line_points[
+            (current_line_points[:, 1] <= y_ocean) & 
+            (current_line_points[:, 1] >= y_land)
+        ]
+        y_min, y_max = y_land, y_ocean
     
-    # 计算当前线在哪一层
-    current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
+
     
     # 将当前线的点云分成多个分块
     current_line_points_blocks = {}
     current_line_points_blocks_heights = {}
     x_min, x_max = lines_dict[current_line]
-    y_min, y_max = y_land, y_ocean
+    
 
     # 计算原始的分块数量
     original_n_y = int(floor((y_max - y_min) / block_length))
@@ -3036,7 +3230,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
             current_line_points_blocks_heights[(i, j)] = current_line_points_block_height
 
             
-            if mode_flag!=2 and mode_flag!=3: #海陆侧抓取模式
+            if (mode_flag!=2 and mode_flag!=3 and mode_flag!=4) or mode_flag_4_mode: #海陆侧抓取模式
 
                 # 计算分块与排除区域的交集面积
                 overlap_x_min = max(x_min_block, remove_x_negative)
@@ -3059,7 +3253,12 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
         
     # 选取连续的面积为24的块，统计这些块的平均高度值
-    window_size = 6
+    window_size_y = 6          # Y方向窗口大小
+    x_window_size = 4        # X方向窗口大小（固定为4）
+    
+    if x_window_size > n_x:
+        logger.warning(f"x_window_size({x_window_size}) 超过 n_x({n_x})，已限制为 n_x")
+        x_window_size = n_x
 
     if mode_flag==2 or mode_flag==3: #海陆侧抓取模式
     #将划分的这些行，分成两个区域，一个是陆侧，一个是海侧，偶数的话将这些行平均分成两半，奇数的话将这些行平均分成两半，但是多出来的那一行，作为陆侧的，然后将海陆侧的间隔坐标作为中心线
@@ -3081,15 +3280,15 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         
         if mode_flag==2: #海侧抓取模式
 
-            if ocean_end-ocean_start+1<window_size:
-                logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size})，无法进行抓取")
+            if ocean_end-ocean_start+1<window_size_y:
+                logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size_y})，无法进行抓取")
                 logger.info(f"直接从中心线分海陆侧区域")
                 ocean_start=separate
                 logger.info(f"海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
-                if ocean_end-ocean_start+1<window_size:
-                    logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size})，无法进行抓取")
+                if ocean_end-ocean_start+1<window_size_y:
+                    logger.info(f"海侧的块数({ocean_end-ocean_start+1})小于窗口大小({window_size_y})，无法进行抓取")
                     logger.info(f"直接从最海侧取一个抓取点")
-                    ocean_start=ocean_end-window_size+1
+                    ocean_start=ocean_end-window_size_y+1
                     logger.info(f"海侧的开始({ocean_start})，海侧的结束({ocean_end})，海侧的块数({ocean_end-ocean_start+1})")
 
 
@@ -3106,15 +3305,15 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                         logger.info(f"分块({i},{j})不在海侧范围内，设置高度为999")
 
         if mode_flag==3: #陆侧抓取模式
-            if land_end-land_start+1<window_size:
-                logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size})，无法进行抓取")
+            if land_end-land_start+1<window_size_y:
+                logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size_y})，无法进行抓取")
                 logger.info(f"直接从中心线分海陆侧区域")
                 land_end=separate-1
                 logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})")
-                if land_end-land_start+1<window_size:
-                    logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size})，无法进行抓取")
+                if land_end-land_start+1<window_size_y:
+                    logger.info(f"陆侧的块数({land_end-land_start+1})小于窗口大小({window_size_y})，无法进行抓取")
                     logger.info(f"直接从最陆侧取一个抓取点")
-                    land_end=land_start+window_size-1
+                    land_end=land_start+window_size_y-1
                     logger.info(f"陆侧的开始({land_start})，陆侧的结束({land_end})，陆侧的块数({land_end-land_start+1})")
 
 
@@ -3136,39 +3335,47 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     
     # 遍历所有可能的起点
     best_start_y = None
+    best_start_x = None
     best_avg_height = -np.inf
     best_blocks = None
     best_block_heights = []
     
-    for start_y in range(0, n_y - window_size + 1):
-        heights = []
-        has_invalid_block = False  # 标记是否包含高度为999的块
-        
-        for i in range(start_y, start_y + window_size):
-            for j in range(n_x):
-                h = current_line_points_blocks_heights.get((i, j))
-                if h == 999:
-                    has_invalid_block = True
-                    break  # 提前跳出当前列
-                if h is not None and not np.isnan(h):
-                    heights.append(h)
+    # Y×X 双滑窗，限定 X 方向窗口为 line_width/block_width
+    for start_y in range(0, n_y - window_size_y + 1):
+        for start_x in range(0, n_x - x_window_size + 1):
+            heights = []
+            has_invalid_block = False  # 标记是否包含高度为999的块
+            
+            for i in range(start_y, start_y + window_size_y):
+                for j in range(start_x, start_x + x_window_size):
+                    h = current_line_points_blocks_heights.get((i, j))
+                    if h == 999:
+                        has_invalid_block = True
+                        break  # 提前跳出当前行的列循环
+                    if h is not None and not np.isnan(h):
+                        heights.append(h)
+                if has_invalid_block:
+                    break  # 提前跳出当前窗口的行循环
+
             if has_invalid_block:
-                break  # 提前跳出当前行
+                logger.info(f"窗口起始于 y={start_y}, x={start_x} 的块包含无效高度999，跳过")
+                continue
 
-        if has_invalid_block:
-            logger.info(f"窗口起始于 y={start_y} 的块包含无效高度999，跳过")
-            continue
-
-        if heights:
-            avg_height = np.mean(heights)
-            if avg_height > best_avg_height:
-                # 记录当前块的高度
-                best_block_heights = heights
-                best_avg_height = avg_height
-                best_start_y = start_y
-                best_blocks = [(i, j) for i in range(start_y, start_y + window_size) for j in range(n_x)]
-                # 打印当前最佳块
-                logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
+            if heights:
+                avg_height = np.mean(heights)
+                if avg_height > best_avg_height:
+                    # 记录当前窗口的高度与块坐标
+                    best_block_heights = heights
+                    best_avg_height = avg_height
+                    best_start_y = start_y
+                    best_start_x = start_x
+                    best_blocks = [
+                        (i, j)
+                        for i in range(best_start_y, best_start_y + window_size_y)
+                        for j in range(best_start_x, best_start_x + x_window_size)
+                    ]
+                    # 打印当前最佳块
+                    logger.info(f"当前最佳块: {best_blocks}，平均高度: {best_avg_height}")
 
     # 检查是否找到了最佳结果
     if best_blocks is None or best_avg_height == -np.inf:
@@ -3183,9 +3390,9 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     max_height = max(best_block_heights)
     logger.info(f"最佳块的最高高度: {max_height}")
 
-    # 计算这些块的高度的方差
+    # 计算这些块的高度的方差（使用实际窗口列数）
     height_var = np.var(best_block_heights)
-    logger.info(f"{window_size*(line_width/block_width)}块的高度的方差: {height_var}")
+    logger.info(f"{window_size_y * x_window_size}块的高度的方差: {height_var}")
     
     # 计算中心点坐标
     center_xs = []
@@ -3224,7 +3431,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     # 判断这些块的高度的方差是否小于阈值
     if height_var < plane_threshold:
         # 如果小于阈值，就认为这些块是平面的
-        logger.info(f"这{window_size*(line_width/block_width)}块是平面的")
+        logger.info(f"这{window_size_y*(line_width/block_width)}块是平面的")
         if Sign==1:
             if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
                 avg_height = max_height + k*height_var+b
@@ -3241,7 +3448,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                 logger.info(f"高度改变了{plane_distance}米，改变前为{best_avg_height}，改变后为{avg_height}")
     else:
         # 如果大于阈值，就认为这些块不是平面的
-        logger.info(f"这{window_size*(line_width/block_width)}块是斜面的")
+        logger.info(f"这{window_size_y*(line_width/block_width)}块是斜面的")
         if Sign==1:
             if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
                 avg_height = max_height + k*height_var+b
@@ -3285,6 +3492,113 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
     logger.info(f"抓取点的坐标: X={avg_x:.3f}, Y={avg_y:.3f}, Z={avg_height:.3f}")
     
     return capture_point,capture_point_layer
+
+
+
+
+
+
+def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile_points,x_negative,x_positive,y_ocean,y_land):
+    """
+    将这个区域分成九宫格
+    """
+    # 计算九宫格的边长
+    square_side_length = (x_positive - x_negative) / 3
+    square_side_width = (y_ocean-y_land ) / 3
+
+    #计算九宫格的每格范围
+
+    for i in range(3):
+        for j in range(3):
+            x_min = x_negative + i * square_side_length
+            x_max = x_min + square_side_length
+            y_min = y_land + j * square_side_width
+            y_max = y_min + square_side_width
+            square_ranges.append({"x_min":x_min, "x_max":x_max, "y_min":y_min, "y_max":y_max})
+
+    #判断这些范围的y_max-y_min是否大于或等于6米，x_max-x_min是否大于等于4米。逐个处理格子，我需要知道这是第几个格子
+    for i, square_range in enumerate(square_ranges):
+        x_min = square_range["x_min"]
+        x_max = square_range["x_max"]
+        y_min = square_range["y_min"]
+        y_max = square_range["y_max"]
+
+        if i==0 or i==1 or i==2 or i==3 or i==4 or i==5:
+            if(x_max-x_min<4):
+                logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
+                x_max=x_min+4
+                square_ranges[i]["x_max"]=x_max
+             #如果x_max-x_min不是整数，调整x_max
+            if x_max-x_min!=int(x_max-x_min):
+                x_max=x_min+math.ceil(x_max-x_min)
+                logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须是整数")
+                square_ranges[i]["x_max"]=x_max
+
+        if i==6 or i==7 or i==8:
+            if(x_max-x_min<4):
+                logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
+                x_min=x_max-4
+                square_ranges[i]["x_min"]=x_min
+             #如果x_max-x_min不是整数，调整x_min
+            if x_max-x_min!=int(x_max-x_min):
+                x_min=x_max-math.ceil(x_max-x_min)
+                logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须是整数")
+                square_ranges[i]["x_min"]=x_min
+
+        if i==0 or i==3 or i==6 or i==1 or i==4 or i==7:
+            if(y_max-y_min<6):
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
+                y_max=y_min+6
+                square_ranges[i]["y_max"]=y_max
+             #如果y_max-y_min不是整数，调整y_max
+            if y_max-y_min!=int(y_max-y_min):
+                y_max=y_min+math.ceil(y_max-y_min)
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是整数")
+                square_ranges[i]["y_max"]=y_max
+        
+        if i==2 or i==5 or i==8:
+            if(y_max-y_min<6):
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
+                y_min=y_max-6
+                square_ranges[i]["y_min"]=y_min
+             #如果y_max-y_min不是整数，调整y_min
+            if y_max-y_min!=int(y_max-y_min):
+                y_min=y_max-math.ceil(y_max-y_min)
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是整数")
+                square_ranges[i]["y_min"]=y_min
+    
+    #打印
+    for i, square_range in enumerate(square_ranges):
+        x_min = square_range["x_min"]
+        x_max = square_range["x_max"]
+        y_min = square_range["y_min"]
+        y_max = square_range["y_max"]
+        logger.info(f"第{i+1}个格子的范围: x_min={x_min:.3f}, x_max={x_max:.3f}, y_min={y_min:.3f}, y_max={y_max:.3f}")
+
+    #计算这些格子内点云的平均高度,存入nine_square_block_heights
+    for i, square_range in enumerate(square_ranges):
+        x_min = square_range["x_min"]
+        x_max = square_range["x_max"]
+        y_min = square_range["y_min"]
+        y_max = square_range["y_max"]
+        # 筛选出在当前格子内的点
+        mask = (
+            (world_coal_pile_points[:, 0] >= x_min) & (world_coal_pile_points[:, 0] < x_max) &
+            (world_coal_pile_points[:, 1] >= y_min) & (world_coal_pile_points[:, 1] < y_max)
+        )
+        # 计算平均高度
+        avg_height = np.mean(world_coal_pile_points[mask, 2])
+        nine_square_block_heights.append(avg_height)
+        logger.info(f"第{i+1}个格子内点云的平均高度: {avg_height:.3f}米")
+
+
+
+
+
+
+
+
+
 
 
 def get_bottom_depth_result(process_id="160", current_hatch=None):
@@ -3347,7 +3661,6 @@ def get_next_line(current_line, direction, line_numbers, tried_lines=None):
   min_line = line_numbers[0]
   max_line = line_numbers[-1]
   total_lines = len(line_numbers)
-  
   if tried_lines is None:
       tried_lines = set()
   
@@ -3371,9 +3684,20 @@ def get_next_line(current_line, direction, line_numbers, tried_lines=None):
   else:
       # 总线数不大于3条时，保持原有逻辑
       next_line = current_line + direction
+      # 如果next_line不在line_numbers中，但在最大线和最小线的范围内，说明还需要接着换线，直到换的线在line_numbers中
+      while next_line not in line_numbers and min_line <= next_line <= max_line:
+          next_line += direction
+      
       # 到达边界时反向
       if next_line < min_line or next_line > max_line:
           direction *= -1
           next_line = current_line + direction
+              # 如果next_line不在line_numbers中，但在最大线和最小线的范围内，说明还需要接着换线，直到换的线在line_numbers中
+
+      while next_line not in line_numbers and min_line <= next_line <= max_line:
+          next_line += direction
+
 
   return next_line, direction
+
+  

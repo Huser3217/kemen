@@ -534,33 +534,53 @@ async def main():
                 #     break
                 
                 #现在先以x_negative和x_positive为线的中心基准，生成两条线
-                line1_x_negative=x_negative-line_width/2
-                line1_x_positive=x_negative+line_width/2
-                line2_x_negative=x_positive-line_width/2
-                line2_x_positive=x_positive+line_width/2
-                lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
-                
-                #剩下的x轴范围,两边都预留了半个line_gap的宽度
-                x_remaining=line2_x_negative-line1_x_positive-line_gap
-                
-                #计算可以生成多少条线
-                num_lines=int(x_remaining/(line_width+line_gap))
-                #所以现在每条线的宽度为
-                line_w=x_remaining/num_lines
-                
-                for i in range(num_lines):
-                    #线的中心点位置
-                    line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
-                
-                    lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
-                
-                
-                #给这些线编号，从负方向开始
-                lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
-                # 给每条线编号（从负方向到正方向）
-                lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
-                for num, (x_min, x_max) in lines_dict.items():
-                    logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
+                square_ranges=[]
+                nine_square_block_heights=[]
+                if mode_flag==4:
+                    
+                    nine_squarecalculate(
+                        square_ranges=square_ranges,
+                        nine_square_block_heights=nine_square_block_heights,
+                        world_coal_pile_points=world_coal_pile_points,
+                        x_negative=x_negative,
+                        x_positive=x_positive,
+                        y_ocean=y_ocean,
+                        y_land=y_land
+                    )
+                    
+                    lines_dict={}
+
+                    lines_dict={1:(square_ranges[0]["x_min"],square_ranges[0]["x_max"]),2:(square_ranges[3]["x_min"],square_ranges[3]["x_max"]),3:(square_ranges[6]["x_min"],square_ranges[6]["x_max"])}
+
+
+                else:
+                    line1_x_negative=x_negative-line_width/2
+                    line1_x_positive=x_negative+line_width/2
+                    line2_x_negative=x_positive-line_width/2
+                    line2_x_positive=x_positive+line_width/2
+                    lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
+                    
+                    #剩下的x轴范围,两边都预留了半个line_gap的宽度
+                    x_remaining=line2_x_negative-line1_x_positive-line_gap
+                    
+                    #计算可以生成多少条线
+                    num_lines=int(x_remaining/(line_width+line_gap))
+                    #所以现在每条线的宽度为
+                    line_w=x_remaining/num_lines
+                    
+                    for i in range(num_lines):
+                        #线的中心点位置
+                        line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
+                    
+                        lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
+                    
+                    
+                    #给这些线编号，从负方向开始
+                    lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
+                    # 给每条线编号（从负方向到正方向）
+                    lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
+                    for num, (x_min, x_max) in lines_dict.items():
+                        logger.info(f"编号 {num}：范围=({x_min:.2f}, {x_max:.2f})")
                 
                 
                 #定义一个字典，用来保存每条线的高度
@@ -578,107 +598,209 @@ async def main():
                     #保存在一个字典内
                     line_heights_dict[num]=line_height
                 
-                
-                #根据大车当前位置，确定大车当前处于哪一条线
-                current_line=None
-                for num, (x_min, x_max) in lines_dict.items():
-                    if current_machine_position>=x_min and current_machine_position<=x_max:
-                        current_line=num
-                        break
-                if current_line is None:
-                    
-                    logger.info("大车当前位置不在任何一条线上，将去往平均高度最高的那条线")
-                    #获取平均高度最高的那条线
-                    current_line=max(line_heights_dict, key=line_heights_dict.get)
-                    logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
-                    # #跳过这次循环
-                    # continue.
-                
-                else:
-                    logger.info(f"大车当前处于第{current_line}条线")
-                
-                
-                #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
-                current_line_height=line_heights_dict[current_line]
-                #是否需要换线
-                need_change_line=False
+                if last_capture_point_x!=0:
+                    #判断上次抓取的点在哪条线上
 
-                for num, height in line_heights_dict.items():
-                    if num!=current_line:
-                        height_diff=abs(current_line_height-height)
-                        if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                            if (height_diff>config_height_diff and current_line_height<height):
-                                 logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
-                            if (hatch_height-current_line_height)>=max_height_diff:
-                                logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
-                            #启动换线
-                            need_change_line=True
-
-                
+                    for num, (x_min, x_max) in lines_dict.items():
+                        if last_capture_point_x>=x_min and last_capture_point_x<=x_max:
+                            current_line=num
                             break
-                                    
-                #如果需要换线
-                # if need_change_line:
-                #   #获取下一条线，线判断下一条线的与其他线的高度差是否大于4米，大于4米就还需要换线
-                #   next_line, persisted_line_change_direction = get_next_line(current_line, persisted_line_change_direction, list(lines_dict.keys()))
+                else:
+                    current_line=None
+                    
+
+                selected_map=[]
+                if mode_flag==4:
+                    work_completed=False
+                    #选中的格子,从header_info["selection_blocks"]中提取值为1的格子的索引
+                    selected_map=[index for index,value in enumerate(header_info["selection_blocks"]) if value==1]
+                    logger.info(f"选中的格子为：{selected_map}")
+                    if len(selected_map)==0:
+                        logger.error("没有选中任何格子")
+                        raise ValueError("没有选中任何格子")
+
+                    #有格子的线
+                    lines_with_map=[]
+                    #遍历selected_map判断这些格子分别处于哪条线
+                    for index in selected_map:
+                        line=index//3+1
+                        if line not in lines_with_map:
+                            lines_with_map.append(line)
+
+
+
+                    current_line=None
+                    for num, (x_min, x_max) in lines_dict.items():
+                        if current_machine_position>=x_min and current_machine_position<=x_max and num in lines_with_map:
+                            current_line=num
+                            break
+
+                    if current_line is None:
+                        
+                        logger.info("大车当前位置不在任何一条可以作业的线上，将去往平均高度最高的那条线且可以作业的线")
+                        #获取平均高度最高的那条线且在lines_with_map中的线
+                        current_line=max([line for line in line_heights_dict.keys() if line in lines_with_map], key=line_heights_dict.get)
+                        logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
+                        # #跳过这次循环
+                        # continue.
                 
-                #   logger.info(f"换线到第{next_line}条线")
-                work_completed=False
-                if need_change_line:
+                    else:
+                        logger.info(f"大车当前处于第{current_line}条线")
+                
+                
+                    #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
+                    current_line_height=line_heights_dict[current_line]
+                    #是否需要换线
+                    need_change_line=False
+
+                    for num, height in line_heights_dict.items():
+                        if num!=current_line:
+                            height_diff=abs(current_line_height-height)
+                            if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                if (height_diff>config_height_diff and current_line_height<height):
+                                    logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                                if (hatch_height-current_line_height)>=max_height_diff:
+                                    logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
+                                #启动换线
+                                need_change_line=True
+
+                    
+                                break
+                                    
+                    if len(lines_with_map)==1 and need_change_line:
+                        work_completed=True
+                        need_change_line=False
+                   
+                    if need_change_line:
                   # 如果需要换线，就循环找下一条合适的线
                      # 记录已经尝试过的线，防止无限循环
-                  tried_lines = set([current_line])
-                  total_lines = len(lines_dict)
-                  while need_change_line:
-                      next_line, persisted_line_change_direction = get_next_line(
-                          current_line,
-                          persisted_line_change_direction,
-                          list(lines_dict.keys()),
-                          tried_lines
-                      )
-                      logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[next_line]}")
-                      tried_lines.add(next_line)
-                      # 更新当前线
-                      current_line = next_line
-                      current_line_height = line_heights_dict[current_line]
+                        tried_lines = set([current_line])
+                        total_lines = len(lines_with_map)
+                        while need_change_line:
+                            next_line, persisted_line_change_direction = get_next_line(
+                                current_line,
+                                persisted_line_change_direction,
+                                lines_with_map,
+                                tried_lines
+                            )
+                            logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[next_line]}")
+                            tried_lines.add(next_line)
+                            current_line = next_line
+                            current_line_height = line_heights_dict[current_line]
+                        
+                        # 再次判断新线是否需要换线
+                            need_change_line = False
+                            for num, height in line_heights_dict.items():
+                                if num != current_line:
+                                    height_diff = abs(current_line_height - height)
+                                    if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                        if (height_diff>config_height_diff and current_line_height<height):
+                                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                                        if (hatch_height-current_line_height)>=max_height_diff:
+                                            logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
+                                        need_change_line = True
+                                        break
+                            if len(tried_lines)==total_lines and need_change_line:
+                                work_completed=True
+                                raise Exception("换线失败，已经尝试过所有的线，作业结束")  
+                                break      
+
+
+                else:
+                #根据大车当前位置，确定大车当前处于哪一条线
+                    current_line=None
+                    for num, (x_min, x_max) in lines_dict.items():
+                        if current_machine_position>=x_min and current_machine_position<=x_max:
+                            current_line=num
+                            break
+                    if current_line is None:
+                        
                     
-                      # 再次判断新线是否需要换线
-                      need_change_line = False
-                      for num, height in line_heights_dict.items():
-                          if num != current_line:
-                              height_diff = abs(current_line_height - height)
-                              if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
-                                  if (height_diff>config_height_diff and current_line_height<height):
-                                      logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
-                                  if (hatch_height-current_line_height)>=max_height_diff:
-                                      logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
-                                  need_change_line = True
-                                  break
-                      if len(tried_lines)==total_lines and need_change_line:
-                        work_completed=True
+                        logger.info("大车当前位置不在任何一条线上，将去往平均高度最高的那条线")
+                        #获取平均高度最高的那条线
+                        current_line=max(line_heights_dict, key=line_heights_dict.get)
+                        logger.info(f"平均高度最高的那条线为：{current_line}，即将前往{current_line}线")
+                        # #跳过这次循环
+                        # continue.
+                
+                    else:
+                        logger.info(f"大车当前处于第{current_line}条线")
+                
+                
+                    #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
+                    current_line_height=line_heights_dict[current_line]
+                    #是否需要换线
+                    need_change_line=False
 
+                    for num, height in line_heights_dict.items():
+                        if num!=current_line:
+                            height_diff=abs(current_line_height-height)
+                            if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                if (height_diff>config_height_diff and current_line_height<height):
+                                    logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                                if (hatch_height-current_line_height)>=max_height_diff:
+                                    logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
+                                #启动换线
+                                need_change_line=True
 
-                    #异步启动船舱深度测量，不阻塞后续计算
-                        try:
-                            # 保存煤堆点云数据到临时文件，使用进程ID区分
-                            process_id = "170"
-                            temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
-                            np.save(temp_data_file, world_coal_pile_points)
-                            logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
-                            
-                            # 启动measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
-                            script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
-                            subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
-                            # 在需要使用舱底深度的地方
+                    
+                                break
+                                    
 
-                        except Exception as e:
-                            logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
+                    work_completed=False
+                    if need_change_line:
+                  # 如果需要换线，就循环找下一条合适的线
+                     # 记录已经尝试过的线，防止无限循环
+                        tried_lines = set([current_line])
+                        total_lines = len(lines_dict)
+                        while need_change_line:
+                            next_line, persisted_line_change_direction = get_next_line(
+                                current_line,
+                                persisted_line_change_direction,
+                                list(lines_dict.keys()),
+                                tried_lines
+                            )
+                            logger.info(f"换线到第{next_line}条线，当前线的边界位置为：{lines_dict[next_line]}")
+                            tried_lines.add(next_line)
+                        # 更新当前线
+                            current_line = next_line
+                            current_line_height = line_heights_dict[current_line]
+                        
+                        # 再次判断新线是否需要换线
+                            need_change_line = False
+                            for num, height in line_heights_dict.items():
+                                if num != current_line:
+                                    height_diff = abs(current_line_height - height)
+                                    if (height_diff>config_height_diff and current_line_height<height) or ((hatch_height-current_line_height)>=max_height_diff):
+                                        if (height_diff>config_height_diff and current_line_height<height):
+                                            logger.info(f"当前大车所在线的高度为：{current_line_height}，第{num}条线的高度为：{height}，差值为：{height_diff}，大于{config_height_diff}米，需要换线")
+                                        if (hatch_height-current_line_height)>=max_height_diff:
+                                            logger.info(f"当前大车所在线的高度为：{current_line_height}，低于保留高度，需要换线")
+                                        need_change_line = True
+                                        break
+                            if len(tried_lines)==total_lines and need_change_line:
+                                work_completed=True
+                            #异步启动船舱深度测量，不阻塞后续计算
+                                try:
+                                    # 保存煤堆点云数据到临时文件，使用进程ID区分
+                                    process_id = "170"
+                                    temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
+                                    np.save(temp_data_file, world_coal_pile_points)
+                                    logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
+                                    
+                                    # 启动 measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
+                                    script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
+                                    subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
+                                    # 在需要使用舱底深度的地方
 
-                        #抛出一个指定的异常
-                        raise Exception("换线失败，已经尝试过所有的线，作业结束")
+                                except Exception as e:
+                                    logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
 
-                        break
+                                #抛出一个指定的异常
+                                raise Exception("换线失败，已经尝试过所有的线，作业结束")
+
+                                break
 
                                         
                 logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
@@ -715,10 +837,17 @@ async def main():
                 above_current_line_layer2=current_line_layer-limited_layers_y_dump_truck
                 above_current_line_layer2_min_height=hatch_height-(above_current_line_layer2*floor_height)
                 blocks_heights={}
-                process_blocks_for_line(
-
-
-                )
+                # process_blocks_for_line(
+                #     blocks_heights=blocks_heights,
+                #     world_coal_pile_points=world_coal_pile_points,
+                #     lines_dict=lines_dict,
+                #     y_land=y_land,
+                #     y_ocean=y_ocean,
+                #     block_width=block_width,
+                #     block_length=block_length,
+                #     enable_limited_flag=enable_limited_flag,
+                #     logger=logger
+                # )
 
 
                 need_calculate_two=False
@@ -762,7 +891,10 @@ async def main():
                         mode_flag=mode_flag,
                         land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
                         ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
-                        logger=logger
+                        logger=logger,
+                        square_ranges=square_ranges,
+                        selected_map=selected_map
+                        
                        
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
@@ -803,7 +935,10 @@ async def main():
                         mode_flag=mode_flag,
                         land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
                         ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
-                        logger=logger
+                        logger=logger,
+                        square_ranges=square_ranges,
+                        selected_map=selected_map
+                        
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
 
@@ -847,7 +982,9 @@ async def main():
                             mode_flag=mode_flag,
                             land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
                             ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
-                            logger=logger
+                            logger=logger,
+                            square_ranges=square_ranges,
+                            selected_map=selected_map
                                 )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
                     # if abs(capture_point2['x']-capture_point['x'])<0.5:
@@ -1013,6 +1150,8 @@ async def main():
                     'current_unLoadShip':3,
                     'mode_flag':mode_flag,
                     'blocks_heights':blocks_heights_list,
+                    'current_coal_layer':int(current_layer),
+                    'nine_square_block_heights':nine_square_block_heights,
                 }
                
                 #发送给我连接的java服务器
