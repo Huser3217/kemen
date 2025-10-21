@@ -269,7 +269,7 @@ async def main():
                 points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
                 
                 hatch_recognize_success=True
-                if not IS_FIRST_TIME and not np.allclose(points_world, world_coords_refined, atol=2):
+                if not IS_FIRST_TIME and not np.allclose(points_world[:,:2], world_coords_refined[:,:2], atol=2):
                   #比较世界坐标系下的舱口坐标和上一次的舱口坐标是否合理points_world和world_coords_refined
                     if VISUALIZE_FINAL_RESULT:
                         visualize_final_result_with_search_ranges(original_points, hatch_corners_refined, search_geometries, None)
@@ -536,17 +536,20 @@ async def main():
                 #现在先以x_negative和x_positive为线的中心基准，生成两条线
                 square_ranges=[]
                 nine_square_block_heights=[]
-                if mode_flag==4:
-                    
-                    nine_squarecalculate(
+                
+                nine_squarecalculate(
                         square_ranges=square_ranges,
                         nine_square_block_heights=nine_square_block_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         x_negative=x_negative,
                         x_positive=x_positive,
                         y_ocean=y_ocean,
-                        y_land=y_land
+                        y_land=y_land,
+                        block_width=block_width,
+                        block_length=block_length,
                     )
+                if mode_flag==4:
+                    
                     
                     lines_dict={}
 
@@ -597,7 +600,7 @@ async def main():
                     logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
                     #保存在一个字典内
                     line_heights_dict[num]=line_height
-                
+                current_line=None
                 if last_capture_point_x!=0:
                     #判断上次抓取的点在哪条线上
 
@@ -605,6 +608,7 @@ async def main():
                         if last_capture_point_x>=x_min and last_capture_point_x<=x_max:
                             current_line=num
                             break
+                    
                 else:
                     current_line=None
                     
@@ -629,11 +633,11 @@ async def main():
 
 
 
-                    current_line=None
-                    for num, (x_min, x_max) in lines_dict.items():
-                        if current_machine_position>=x_min and current_machine_position<=x_max and num in lines_with_map:
-                            current_line=num
-                            break
+                    # current_line=None
+                    # for num, (x_min, x_max) in lines_dict.items():
+                    #     if current_machine_position>=x_min and current_machine_position<=x_max and num in lines_with_map:
+                    #         current_line=num
+                    #         break
 
                     if current_line is None:
                         
@@ -708,11 +712,11 @@ async def main():
 
                 else:
                 #根据大车当前位置，确定大车当前处于哪一条线
-                    current_line=None
-                    for num, (x_min, x_max) in lines_dict.items():
-                        if current_machine_position>=x_min and current_machine_position<=x_max:
-                            current_line=num
-                            break
+                    # current_line=None
+                    # for num, (x_min, x_max) in lines_dict.items():
+                    #     if current_machine_position>=x_min and current_machine_position<=x_max:
+                    #         current_line=num
+                    #         break
                     if current_line is None:
                         
                     
@@ -812,6 +816,50 @@ async def main():
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
 
+                if current_line_layer!=current_layer:
+                    if current_line_layer<=4:
+                        safe_distance_y_ocean=safe_distance_y_ocean_init-((current_line_layer-1)*expansion_y_front)
+                        safe_distance_y_land=safe_distance_y_land_init-((current_line_layer-1)*expansion_y_front)
+                        if safe_distance_y_ocean<=0:
+                            safe_distance_y_ocean=0
+                        if safe_distance_y_land<=0:
+                            safe_distance_y_land=0
+                    
+                        logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
+                        logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+                    else:
+                        safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_line_layer-4)*expansion_y_back)
+                        safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_line_layer-4)*expansion_y_back)
+                    
+                        if safe_distance_y_ocean<=0:
+                            safe_distance_y_ocean=0
+                        if safe_distance_y_land<=0:
+                            safe_distance_y_land=0
+                        logger.info(f"海侧安全距离为：{safe_distance_y_ocean}")
+                        logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
+
+
+                    y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
+                    y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
+
+                    if mode_flag==4:
+                        square_ranges=[]
+                        nine_square_block_heights=[]
+                        nine_squarecalculate(
+                        square_ranges=square_ranges,
+                        nine_square_block_heights=nine_square_block_heights,
+                        world_coal_pile_points=world_coal_pile_points,
+                        x_negative=x_negative,
+                        x_positive=x_positive,
+                        y_ocean=y_ocean,
+                        y_land=y_land,
+                        block_width=block_width,
+                        block_length=block_length,
+                    )
+
+
+
+
                 limited_layers=config.GrabPointCalculationConfig_170.limited_layers
                 limited_height=hatch_height-(config.GrabPointCalculationConfig_170.limited_height*floor_height)
                 x_dump_truck=config.GrabPointCalculationConfig_170.x_dump_truck
@@ -819,6 +867,11 @@ async def main():
                 limited_change_height=config.GrabPointCalculationConfig_170.limited_change_height
                 limited_layers_y_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_y_dump_truck
                 limited_layers_x_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_x_dump_truck
+                max_height_var_change=config.GrabPointCalculationConfig_170.max_height_var_change
+                land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline
+                ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline
+                y_offset_layer=config.GrabPointCalculationConfig_170.y_offset_layer
+                y_offset=config.GrabPointCalculationConfig_170.y_offset
 
 
                 
@@ -826,6 +879,12 @@ async def main():
                     enable_limited_flag=True
                 else:
                     enable_limited_flag=False
+
+
+                if current_line_layer>=y_offset_layer:
+                    enable_y_offset_flag=True
+                else:
+                    enable_y_offset_flag=False
 
                 #大车方向甩斗的高度限制
 
@@ -853,7 +912,7 @@ async def main():
                 need_calculate_two=False
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
                     need_calculate_two=True
-                
+                exclude_radius=1.2
                 if need_calculate_two:
                     # 计算第一个抓取点
                     capture_point, capture_point_layer = calculate_capture_point(
@@ -862,7 +921,7 @@ async def main():
                         current_line=current_line,
                         exclude_x_center=last_capture_point_x,
                         exclude_y_center=last_capture_point_y,
-                        exclude_radius=2,
+                        exclude_radius=exclude_radius,
                         x_left=x_left,
                         x_right=x_right,
                         y_front=y_front,
@@ -889,9 +948,12 @@ async def main():
                         limited_change_height=limited_change_height,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         mode_flag=mode_flag,
-                        land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
-                        ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
+                        land_to_centerline=land_to_centerline,
+                        ocean_to_centerline=ocean_to_centerline,
                         logger=logger,
+                        max_height_var_change =max_height_var_change,
+                        y_offset=y_offset,
+                        enable_y_offset_flag=enable_y_offset_flag,
                         square_ranges=square_ranges,
                         selected_map=selected_map
                         
@@ -906,7 +968,7 @@ async def main():
                         current_line=current_line,
                         exclude_x_center=capture_point['x'],
                         exclude_y_center=capture_point['y'],
-                        exclude_radius=2,
+                        exclude_radius=exclude_radius,
                         x_left=x_left,
                         x_right=x_right,
                         y_front=y_front,
@@ -933,9 +995,12 @@ async def main():
                         limited_change_height=limited_change_height,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         mode_flag=mode_flag,
-                        land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
-                        ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
+                        land_to_centerline=land_to_centerline,
+                        ocean_to_centerline=ocean_to_centerline,
                         logger=logger,
+                        max_height_var_change =max_height_var_change,
+                        y_offset=y_offset,
+                        enable_y_offset_flag=enable_y_offset_flag,
                         square_ranges=square_ranges,
                         selected_map=selected_map
                         
@@ -953,7 +1018,7 @@ async def main():
                             current_line=current_line,
                             exclude_x_center=last_capture_point_x,
                             exclude_y_center=last_capture_point_y,
-                            exclude_radius=2,
+                            exclude_radius=exclude_radius,
                             x_left=x_left,
                             x_right=x_right,
                             y_front=y_front,
@@ -980,9 +1045,12 @@ async def main():
                             limited_change_height=limited_change_height,
                             above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                             mode_flag=mode_flag,
-                            land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline,
-                            ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline,
+                            land_to_centerline=land_to_centerline,
+                            ocean_to_centerline=ocean_to_centerline,
                             logger=logger,
+                            max_height_var_change =max_height_var_change,
+                            y_offset=y_offset,
+                            enable_y_offset_flag=enable_y_offset_flag,
                             square_ranges=square_ranges,
                             selected_map=selected_map
                                 )
@@ -1123,12 +1191,11 @@ async def main():
                 
             #try块执行成功后，执行else块
             else:
-
                 coal_pile_data["capture_point"] = capture_point
                 coal_pile_data["capture_point_layer"]=capture_point_layer
                 coal_pile_data["current_line_layer"]=current_line_layer
                 coal_pile_data["capture_point_layer_min_height"]=float(capture_point_layer_min_height)
-                
+                coal_pile_data["square_ranges"]=square_ranges
                 
                 
                  #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
