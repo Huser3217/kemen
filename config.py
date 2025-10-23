@@ -9,7 +9,7 @@ import os
 import struct
 
 
-HEADER_FORMAT = "<4s HHHHIIdd II QQ II 3d 12d 12d 15d I 6d"
+HEADER_FORMAT = "<4s HHHHIIdd II QQ III 3d 12d 12d 15d I 6d 9b"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -61,7 +61,7 @@ class GrabPointCalculationConfig_170:
     BROADCAST_PORT = 8765  # 使用不同的端口避免冲突
 
 
-    VIS_ORIGINAL_3D = False  # 可视化原始点云
+    VIS_ORIGINAL_3D = True  # 可视化原始点云
     VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
     VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
     VISUALIZE_FINAL_RESULT = False      # 可视化最终结果
@@ -106,10 +106,18 @@ class GrabPointCalculationConfig_170:
     
     limited_layers=6  #开启海陆侧甩斗限制的层数
     limited_height=4.5  #限制的层数高度
-    limited_change_height=1.4  #海陆侧甩斗向上加一定距离
+
+    limited_change_height_land=1.4  #陆侧甩斗向上加一定距离
+    limited_change_height_ocean=2.8  #海侧甩斗向上加一定距离
+
+
+        #大车甩斗
+    limited_change_height_land_x_dump=0.4  #陆侧甩斗向上加一定距离
+    limited_change_height_ocean_x_dump=1  #海侧甩斗向上加一定距离
+    limited_change_height_normal_x_dump=1 #大车甩，小车不甩 ，向上加一定高度
 
     #小车方向甩斗的限制层数
-    limited_layers_y_dump_truck=2.5
+    limited_layers_y_dump_truck=4
 
     #大车方向甩斗的限制层数
     limited_layers_x_dump_truck=2
@@ -119,16 +127,26 @@ class GrabPointCalculationConfig_170:
     y_dump_truck=3             #距离小车方向的安全边界的距离阈值，判断是否在小车方向甩斗
 
 
+    y_grab_expansion_change_layer=7
     y_grab_expansion=3.1    #海陆侧向外多延申的距离
+    y_grab_expansion2=4.5   #7层及以下向外多延申的距离
 
 
     #分割海陆侧的参数
-    land_to_centerline=2  #距离中心线的距离阈值，判断是否在陆侧
-    ocean_to_centerline=2  #距离中心线的距离阈值，判断是否在海侧
+    land_to_centerline=1  #距离中心线的距离阈值，判断是否在陆侧
+    ocean_to_centerline=1  #距离中心线的距离阈值，判断是否在海侧
+
+    max_height_var_change=1 #方差改变高度的最大值
 
 
+    #小车方向甩斗，开启y坐标的偏移的层
+    y_offset_layer=7
+    y_offset_land=2
+    y_offset_ocean=3
 
-
+    #大车小车同时甩斗，y坐标的偏移
+    y_offset_land_xy_dump=0.2 #陆侧
+    y_offset_ocean_xy_dump=0.8 #海侧
 
 class GrabPointCalculationConfig_160:
     """
@@ -188,7 +206,7 @@ class GrabPointCalculationConfig_160:
     translation = [1.58, 24.324, 31.4]
         
     # 旋转角度 [roll, pitch, yaw] 
-    rotation_angles = [-6.05, 0.15, 0]
+    rotation_angles = [0, 0.15, 0]
 
     # 粗过滤coarse_filtration_point_cloud函数的参数
     x_initial_threshold=10.0 
@@ -234,3 +252,10 @@ class GrabPointCalculationConfig_160:
 
 
     y_grab_expansion=3.1    #海陆侧向外多延申的距离
+
+        #分割海陆侧的参数
+    land_to_centerline=1  #距离中心线的距离阈值，判断是否在陆侧
+    ocean_to_centerline=1  #距离中心线的距离阈值，判断是否在海侧
+
+    
+    max_height_var_change=0.5 #方差改变高度的最大值

@@ -3054,7 +3054,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset,enable_y_offset_flag,square_ranges=[],selected_map=[],
+                          x_dump_truck,y_dump_truck,limited_change_height_land,limited_change_height_ocean,limited_change_height_land_x_dump,limited_change_height_ocean_x_dump,limited_change_height_normal_x_dump,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset_land,y_offset_ocean,y_offset_land_xy_dump,y_offset_ocean_xy_dump,enable_y_offset_flag,y_grab_expansion_change_flag,square_ranges=[],selected_map=[],
                           
                           ):
     """
@@ -3443,7 +3443,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         # 如果小于阈值，就认为这些块是平面的
         logger.info(f"这{window_size_y*(line_width/block_width)}块是平面的")
         if Sign==1:
-            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+            if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
 
                 avg_height = max_height + min(k * height_var + b, max_height_var_change)
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
@@ -3451,7 +3451,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                 avg_height = best_avg_height + min(k * height_var + b, max_height_var_change)
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
-            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+            if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
                 avg_height = max_height + plane_distance
                 logger.info(f"高度改变了{plane_distance}米，改变前为{max_height}，改变后为{avg_height}")
             else:
@@ -3461,7 +3461,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         # 如果大于阈值，就认为这些块不是平面的
         logger.info(f"这{window_size_y*(line_width/block_width)}块是斜面的")
         if Sign==1:
-            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+            if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
                 avg_height = max_height + min(k * height_var + b, max_height_var_change)
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
             else:
@@ -3469,7 +3469,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
         else:
 
-            if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
+            if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
                 avg_height = max_height + bevel_distance
                 logger.info(f"高度改变了{bevel_distance}米，改变前为{max_height}，改变后为{avg_height}")
             else:
@@ -3479,30 +3479,73 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
 
     if enable_limited_flag and y_dump_truck_flag and not x_dump_truck_flag:
-        avg_height += limited_change_height
-        logger.info(f"海陆侧甩斗，高度增加{limited_change_height}，改变前为{avg_height-limited_change_height}，改变后为{avg_height}")
+        if abs(avg_y-y_front)<=y_dump_truck:
+
+            avg_height += limited_change_height_ocean
+            logger.info(f"海侧甩斗，高度增加{limited_change_height_ocean}，改变前为{avg_height-limited_change_height_ocean}，改变后为{avg_height}")
+            
+        if abs(avg_y-y_back)<=y_dump_truck:
+            avg_height += limited_change_height_land
+            logger.info(f"陆侧甩斗，高度增加{limited_change_height_land}，改变前为{avg_height-limited_change_height_land}，改变后为{avg_height}")
         if avg_height>min(above_current_line_layer2_min_height,limited_height):
             avg_height=min(above_current_line_layer2_min_height,limited_height)
             if above_current_line_layer2_min_height<limited_height:
-                print(f"被above_current_line_layer2_min_height限制")
+                logger.info(f"被above_current_line_layer2_min_height限制")
             else:
-                print(f"被limited_height限制")
+                logger.info(f"被limited_height限制")
             logger.info(f"超过限制高度，高度设置为{min(above_current_line_layer2_min_height,limited_height)}")
-            
 
-    else:
-        if avg_height >= above_current_line_layer_min_height:
-            avg_height = above_current_line_layer_min_height
-            logger.info(f"高于大车方向甩斗限制的最低高度，高度设置为{above_current_line_layer_min_height}")
+    
+    if enable_y_offset_flag and x_dump_truck_flag and y_dump_truck_flag:
+        if abs(avg_y-y_front)<=y_dump_truck:
+
+            avg_height += limited_change_height_ocean_x_dump
+            logger.info(f"海侧甩斗，高度增加{limited_change_height_ocean_x_dump}，改变前为{avg_height-limited_change_height_ocean_x_dump}，改变后为{avg_height}")
+
+        if abs(avg_y-y_back)<=y_dump_truck:
+            avg_height += limited_change_height_land_x_dump
+            logger.info(f"陆侧甩斗，高度增加{limited_change_height_land_x_dump}，改变前为{avg_height-limited_change_height_land_x_dump}，改变后为{avg_height}")
+    if enable_y_offset_flag and x_dump_truck_flag and not y_dump_truck_flag:
+        avg_height += limited_change_height_normal_x_dump
+        logger.info(f"大车方向甩斗,小车方向不甩斗，高度增加{limited_change_height_normal_x_dump}，改变前为{avg_height-limited_change_height_normal_x_dump}，改变后为{avg_height}")
+    
+    if enable_limited_flag and x_dump_truck_flag:
+        if avg_height >= limited_height:
+            avg_height = limited_height
+            logger.info(f"高于大车方向甩斗限制的最低高度，高度设置为{limited_height}")
+
+
+    if y_grab_expansion_change_flag:
+        if avg_y>=y_front:
+            avg_y=y_front
+            logger.info(f"y坐标超过了y_front，y坐标设置为{y_front}")
+
+        if avg_y<=y_back:
+            avg_y=y_back
+            logger.info(f"y坐标超过了y_back，y坐标设置为{y_back}")
+
+            
 
     if enable_y_offset_flag and y_dump_truck_flag and not x_dump_truck_flag:
         if abs(avg_y-y_front)<=y_dump_truck:
 
-            avg_y=avg_y+y_offset
-            logger.info(f"海侧甩斗，y坐标增大{y_offset}，改变前为{avg_y-y_offset}，改变后为{avg_y}")
+            avg_y=avg_y+y_offset_ocean
+            logger.info(f"海侧甩斗，y坐标增大{y_offset_ocean}，改变前为{avg_y-y_offset_ocean}，改变后为{avg_y}")
         if abs(avg_y-y_back)<=y_dump_truck:
-            avg_y=avg_y-y_offset
-            logger.info(f"陆侧甩斗，y坐标减小{y_offset}，改变前为{avg_y+y_offset}，改变后为{avg_y}")
+            avg_y=avg_y-y_offset_land
+            logger.info(f"陆侧甩斗，y坐标减小{y_offset_land}，改变前为{avg_y+y_offset_land}，改变后为{avg_y}")
+
+
+    if enable_y_offset_flag and x_dump_truck_flag and y_dump_truck_flag:
+        if abs(avg_y-y_front)<=y_dump_truck:
+
+            avg_y=avg_y+y_offset_ocean_xy_dump
+            logger.info(f"海侧甩斗，y坐标增大{y_offset_ocean_xy_dump}，改变前为{avg_y-y_offset_ocean_xy_dump}，改变后为{avg_y}")
+        if abs(avg_y-y_back)<=y_dump_truck:
+            avg_y=avg_y-y_offset_land_xy_dump
+            logger.info(f"陆侧甩斗，y坐标减小{y_offset_land_xy_dump}，改变前为{avg_y+y_offset_land_xy_dump}，改变后为{avg_y}")
+
+
 
     # 计算抓取点处于哪一层
     capture_point_layer = math.ceil(abs(hatch_height - avg_height) / floor_height)

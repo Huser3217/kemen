@@ -448,10 +448,10 @@ async def main():
                     safe_distance_x_positive=safe_distance_x_positive_init-((current_layer-1)*expansion_x_front)
                     safe_distance_y_ocean=safe_distance_y_ocean_init-((current_layer-1)*expansion_y_front)
                     safe_distance_y_land=safe_distance_y_land_init-((current_layer-1)*expansion_y_front)
-                    if safe_distance_x_negative<=0.4:
-                        safe_distance_x_negative=0.4
-                    if safe_distance_x_positive<=0.4:
-                        safe_distance_x_positive=0.4
+                    if safe_distance_x_negative<=0.2:
+                        safe_distance_x_negative=0.2
+                    if safe_distance_x_positive<=0.2:
+                        safe_distance_x_positive=0.2
                     if safe_distance_y_ocean<=0:
                         safe_distance_y_ocean=0
                     if safe_distance_y_land<=0:
@@ -467,10 +467,10 @@ async def main():
                     safe_distance_y_ocean=safe_distance_y_ocean_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
                     safe_distance_y_land=safe_distance_y_land_init-(3*expansion_y_front)-((current_layer-4)*expansion_y_back)
                 
-                    if safe_distance_x_negative<=0.4:
-                        safe_distance_x_negative=0.4
-                    if safe_distance_x_positive<=0.4:
-                        safe_distance_x_positive=0.4
+                    if safe_distance_x_negative<=0.2:
+                        safe_distance_x_negative=0.2
+                    if safe_distance_x_positive<=0.2:
+                        safe_distance_x_positive=0.2
                     if safe_distance_y_ocean<=0:
                         safe_distance_y_ocean=0
                     if safe_distance_y_land<=0:
@@ -497,8 +497,10 @@ async def main():
                 
                 y_front=min(points_world[1][1],points_world[2][1])
                 y_back=max(points_world[0][1],points_world[3][1])
-                
-                y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
+                if current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
+                else:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
                 y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                 y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
                 logger.info(f"x_positive为：{x_positive}")
@@ -536,13 +538,13 @@ async def main():
                 #现在先以x_negative和x_positive为线的中心基准，生成两条线
                 square_ranges=[]
                 nine_square_block_heights=[]
-                
+
                 nine_squarecalculate(
                         square_ranges=square_ranges,
                         nine_square_block_heights=nine_square_block_heights,
                         world_coal_pile_points=world_coal_pile_points,
-                        x_negative=x_negative,
-                        x_positive=x_positive,
+                        x_negative=x_negative-2,
+                        x_positive=x_positive+2,
                         y_ocean=y_ocean,
                         y_land=y_land,
                         block_width=block_width,
@@ -600,7 +602,9 @@ async def main():
                     logger.info(f"编号 {num} 线内的煤堆点的平均高度: {line_height}")
                     #保存在一个字典内
                     line_heights_dict[num]=line_height
+
                 current_line=None
+
                 if last_capture_point_x!=0:
                     #判断上次抓取的点在哪条线上
 
@@ -631,7 +635,10 @@ async def main():
                         if line not in lines_with_map:
                             lines_with_map.append(line)
 
-
+                    if current_line in lines_with_map:
+                        logger.info(f"上次抓取的点在第{current_line}条线上")
+                    else:
+                        current_line=None
 
                     # current_line=None
                     # for num, (x_min, x_max) in lines_dict.items():
@@ -839,23 +846,29 @@ async def main():
                         logger.info(f"陆侧安全距离为：{safe_distance_y_land}")
 
 
+
+
+                    if current_line_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
+                        y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
+                    else:
+                        y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
                     y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                     y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
 
-                    if mode_flag==4:
-                        square_ranges=[]
-                        nine_square_block_heights=[]
-                        nine_squarecalculate(
-                        square_ranges=square_ranges,
-                        nine_square_block_heights=nine_square_block_heights,
-                        world_coal_pile_points=world_coal_pile_points,
-                        x_negative=x_negative,
-                        x_positive=x_positive,
-                        y_ocean=y_ocean,
-                        y_land=y_land,
-                        block_width=block_width,
-                        block_length=block_length,
-                    )
+
+                    square_ranges=[]
+                    nine_square_block_heights=[]
+                    nine_squarecalculate(
+                    square_ranges=square_ranges,
+                    nine_square_block_heights=nine_square_block_heights,
+                    world_coal_pile_points=world_coal_pile_points,
+                    x_negative=x_negative-2,
+                    x_positive=x_positive+2,
+                    y_ocean=y_ocean,
+                    y_land=y_land,
+                    block_width=block_width,
+                    block_length=block_length,
+                      )
 
 
 
@@ -864,14 +877,23 @@ async def main():
                 limited_height=hatch_height-(config.GrabPointCalculationConfig_170.limited_height*floor_height)
                 x_dump_truck=config.GrabPointCalculationConfig_170.x_dump_truck
                 y_dump_truck=config.GrabPointCalculationConfig_170.y_dump_truck
-                limited_change_height=config.GrabPointCalculationConfig_170.limited_change_height
+                limited_change_height_land=config.GrabPointCalculationConfig_170.limited_change_height_land
+                limited_change_height_ocean=config.GrabPointCalculationConfig_170.limited_change_height_ocean
+                limited_change_height_land_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_land_x_dump
+                limited_change_height_ocean_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_ocean_x_dump
+                limited_change_height_normal_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_normal_x_dump
+                
                 limited_layers_y_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_y_dump_truck
                 limited_layers_x_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_x_dump_truck
                 max_height_var_change=config.GrabPointCalculationConfig_170.max_height_var_change
                 land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline
                 ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline
                 y_offset_layer=config.GrabPointCalculationConfig_170.y_offset_layer
-                y_offset=config.GrabPointCalculationConfig_170.y_offset
+                y_offset_land=config.GrabPointCalculationConfig_170.y_offset_land
+                y_offset_ocean=config.GrabPointCalculationConfig_170.y_offset_ocean
+                y_offset_land_xy_dump=config.GrabPointCalculationConfig_170.y_offset_land_xy_dump
+                y_offset_ocean_xy_dump=config.GrabPointCalculationConfig_170.y_offset_ocean_xy_dump
+
 
 
                 
@@ -886,6 +908,10 @@ async def main():
                 else:
                     enable_y_offset_flag=False
 
+                if current_line_layer>=config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
+                    y_grab_expansion_change_flag=True
+                else:
+                    y_grab_expansion_change_flag=False
                 #大车方向甩斗的高度限制
 
                 above_current_line_layer=current_line_layer-limited_layers_x_dump_truck
@@ -945,15 +971,23 @@ async def main():
                         limited_height=limited_height,
                         x_dump_truck=x_dump_truck,
                         y_dump_truck=y_dump_truck,
-                        limited_change_height=limited_change_height,
+                        limited_change_height_land=limited_change_height_land,
+                        limited_change_height_ocean=limited_change_height_ocean,
+                        limited_change_height_land_x_dump=limited_change_height_land_x_dump,
+                        limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
+                        limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         mode_flag=mode_flag,
                         land_to_centerline=land_to_centerline,
                         ocean_to_centerline=ocean_to_centerline,
                         logger=logger,
                         max_height_var_change =max_height_var_change,
-                        y_offset=y_offset,
+                        y_offset_land=y_offset_land,
+                        y_offset_ocean=y_offset_ocean,
+                        y_offset_land_xy_dump=y_offset_land_xy_dump,
+                        y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
                         enable_y_offset_flag=enable_y_offset_flag,
+                        y_grab_expansion_change_flag=y_grab_expansion_change_flag,
                         square_ranges=square_ranges,
                         selected_map=selected_map
                         
@@ -992,15 +1026,23 @@ async def main():
                         limited_height=limited_height,
                         x_dump_truck=x_dump_truck,
                         y_dump_truck=y_dump_truck,
-                        limited_change_height=limited_change_height,
+                        limited_change_height_land=limited_change_height_land,
+                        limited_change_height_ocean=limited_change_height_ocean,
+                        limited_change_height_land_x_dump=limited_change_height_land_x_dump,
+                        limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
+                        limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
                         above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                         mode_flag=mode_flag,
                         land_to_centerline=land_to_centerline,
                         ocean_to_centerline=ocean_to_centerline,
                         logger=logger,
                         max_height_var_change =max_height_var_change,
-                        y_offset=y_offset,
+                        y_offset_land=y_offset_land,
+                        y_offset_ocean=y_offset_ocean,
+                        y_offset_land_xy_dump=y_offset_land_xy_dump,
+                        y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
                         enable_y_offset_flag=enable_y_offset_flag,
+                        y_grab_expansion_change_flag=y_grab_expansion_change_flag,
                         square_ranges=square_ranges,
                         selected_map=selected_map
                         
@@ -1042,15 +1084,23 @@ async def main():
                             limited_height=limited_height,
                             x_dump_truck=x_dump_truck,
                             y_dump_truck=y_dump_truck,
-                            limited_change_height=limited_change_height,
+                            limited_change_height_land=limited_change_height_land,
+                            limited_change_height_ocean=limited_change_height_ocean,
+                            limited_change_height_land_x_dump=limited_change_height_land_x_dump,
+                            limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
+                            limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
                             above_current_line_layer2_min_height=above_current_line_layer2_min_height,
                             mode_flag=mode_flag,
                             land_to_centerline=land_to_centerline,
                             ocean_to_centerline=ocean_to_centerline,
                             logger=logger,
                             max_height_var_change =max_height_var_change,
-                            y_offset=y_offset,
+                            y_offset_land=y_offset_land,
+                            y_offset_ocean=y_offset_ocean,
+                            y_offset_land_xy_dump=y_offset_land_xy_dump,
+                            y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
                             enable_y_offset_flag=enable_y_offset_flag,
+                            y_grab_expansion_change_flag=y_grab_expansion_change_flag,
                             square_ranges=square_ranges,
                             selected_map=selected_map
                                 )
