@@ -939,15 +939,77 @@ async def main():
                 if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
                     need_calculate_two=True
                 exclude_radius=1.2
-                if need_calculate_two:
-                    # 计算第一个抓取点
-                    capture_point, capture_point_layer = calculate_capture_point(
+
+                # 动态递减屏蔽半径重试封装
+                def calculate_capture_point_with_backoff(exclude_x_center, exclude_y_center):
+                    radius = exclude_radius
+                    min_radius = 0.2
+                    step = 0.2
+                    last_error = None
+                    while radius >= min_radius:
+                        try:
+                            return calculate_capture_point(
+                                world_coal_pile_points=world_coal_pile_points,
+                                lines_dict=lines_dict,
+                                current_line=current_line,
+                                exclude_x_center=exclude_x_center,
+                                exclude_y_center=exclude_y_center,
+                                exclude_radius=radius,
+                                x_left=x_left,
+                                x_right=x_right,
+                                y_front=y_front,
+                                y_back=y_back,
+                                y_land=y_land,
+                                y_ocean=y_ocean,
+                                hatch_height=hatch_height,
+                                current_line_height=current_line_height,
+                                floor_height=floor_height,
+                                block_width=block_width,
+                                block_length=block_length,
+                                line_width=line_width,
+                                plane_threshold=plane_threshold,
+                                plane_distance=plane_distance,
+                                bevel_distance=bevel_distance,
+                                Sign=Sign,
+                                k=k,
+                                b=b,
+                                above_current_line_layer_min_height=above_current_line_layer_min_height,
+                                enable_limited_flag=enable_limited_flag,
+                                limited_height=limited_height,
+                                x_dump_truck=x_dump_truck,
+                                y_dump_truck=y_dump_truck,
+                                limited_change_height_land=limited_change_height_land,
+                                limited_change_height_ocean=limited_change_height_ocean,
+                                limited_change_height_land_x_dump=limited_change_height_land_x_dump,
+                                limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
+                                limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
+                                above_current_line_layer2_min_height=above_current_line_layer2_min_height,
+                                mode_flag=mode_flag,
+                                land_to_centerline=land_to_centerline,
+                                ocean_to_centerline=ocean_to_centerline,
+                                logger=logger,
+                                max_height_var_change =max_height_var_change,
+                                y_offset_land=y_offset_land,
+                                y_offset_ocean=y_offset_ocean,
+                                y_offset_land_xy_dump=y_offset_land_xy_dump,
+                                y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
+                                enable_y_offset_flag=enable_y_offset_flag,
+                                y_grab_expansion_change_flag=y_grab_expansion_change_flag,
+                                square_ranges=square_ranges,
+                                selected_map=selected_map
+                            )
+                        except Exception as e:
+                            last_error = e
+                            logger.warning(f"抓取点计算失败，屏蔽半径 {radius:.2f}，递减重试: {e}",exc_info=True)
+                            radius -= step
+                    logger.warning("尝试关闭屏蔽区域以获取抓取点")
+                    return calculate_capture_point(
                         world_coal_pile_points=world_coal_pile_points,
                         lines_dict=lines_dict,
                         current_line=current_line,
-                        exclude_x_center=last_capture_point_x,
-                        exclude_y_center=last_capture_point_y,
-                        exclude_radius=exclude_radius,
+                        exclude_x_center=exclude_x_center,
+                        exclude_y_center=exclude_y_center,
+                        exclude_radius=0.0,
                         x_left=x_left,
                         x_right=x_right,
                         y_front=y_front,
@@ -990,62 +1052,20 @@ async def main():
                         y_grab_expansion_change_flag=y_grab_expansion_change_flag,
                         square_ranges=square_ranges,
                         selected_map=selected_map
-                        
-                       
+                    )
+
+                if need_calculate_two:
+                    # 计算第一个抓取点（递减屏蔽半径）
+                    capture_point, capture_point_layer = calculate_capture_point_with_backoff(
+                        last_capture_point_x,
+                        last_capture_point_y
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
                     capture_point_effective=1
-                    # 计算第二个抓取点，排除第一个抓取点的区域
-                    capture_point2, capture_point2_layer = calculate_capture_point(
-                        world_coal_pile_points=world_coal_pile_points,
-                        lines_dict=lines_dict,
-                        current_line=current_line,
-                        exclude_x_center=capture_point['x'],
-                        exclude_y_center=capture_point['y'],
-                        exclude_radius=exclude_radius,
-                        x_left=x_left,
-                        x_right=x_right,
-                        y_front=y_front,
-                        y_back=y_back,
-                        y_land=y_land,
-                        y_ocean=y_ocean,
-                        hatch_height=hatch_height,
-                        current_line_height=current_line_height,
-                        floor_height=floor_height,
-                        block_width=block_width,
-                        block_length=block_length,
-                        line_width=line_width,
-                        plane_threshold=plane_threshold,
-                        plane_distance=plane_distance,
-                        bevel_distance=bevel_distance,
-                        Sign=Sign,
-                        k=k,
-                        b=b,
-                        above_current_line_layer_min_height=above_current_line_layer_min_height,
-                        enable_limited_flag=enable_limited_flag,
-                        limited_height=limited_height,
-                        x_dump_truck=x_dump_truck,
-                        y_dump_truck=y_dump_truck,
-                        limited_change_height_land=limited_change_height_land,
-                        limited_change_height_ocean=limited_change_height_ocean,
-                        limited_change_height_land_x_dump=limited_change_height_land_x_dump,
-                        limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
-                        limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
-                        above_current_line_layer2_min_height=above_current_line_layer2_min_height,
-                        mode_flag=mode_flag,
-                        land_to_centerline=land_to_centerline,
-                        ocean_to_centerline=ocean_to_centerline,
-                        logger=logger,
-                        max_height_var_change =max_height_var_change,
-                        y_offset_land=y_offset_land,
-                        y_offset_ocean=y_offset_ocean,
-                        y_offset_land_xy_dump=y_offset_land_xy_dump,
-                        y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
-                        enable_y_offset_flag=enable_y_offset_flag,
-                        y_grab_expansion_change_flag=y_grab_expansion_change_flag,
-                        square_ranges=square_ranges,
-                        selected_map=selected_map
-                        
+                    # 计算第二个抓取点，排除第一个抓取点的区域（递减屏蔽半径）
+                    capture_point2, capture_point2_layer = calculate_capture_point_with_backoff(
+                        capture_point['x'],
+                        capture_point['y']
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
 
@@ -1054,56 +1074,11 @@ async def main():
                     capture_point_layer=0
                     capture_point_effective=0
                     capture_point_layer_min_height=0
-                    capture_point2,capture_point2_layer=calculate_capture_point(
-                            world_coal_pile_points=world_coal_pile_points,
-                            lines_dict=lines_dict,
-                            current_line=current_line,
-                            exclude_x_center=last_capture_point_x,
-                            exclude_y_center=last_capture_point_y,
-                            exclude_radius=exclude_radius,
-                            x_left=x_left,
-                            x_right=x_right,
-                            y_front=y_front,
-                            y_back=y_back,
-                            y_land=y_land,
-                            y_ocean=y_ocean,
-                            hatch_height=hatch_height,
-                            current_line_height=current_line_height,
-                            floor_height=floor_height,
-                            block_width=block_width,
-                            block_length=block_length,
-                            line_width=line_width,
-                            plane_threshold=plane_threshold,
-                            plane_distance=plane_distance,
-                            bevel_distance=bevel_distance,
-                            Sign=Sign,
-                            k=k,
-                            b=b,
-                            above_current_line_layer_min_height=above_current_line_layer_min_height,
-                            enable_limited_flag=enable_limited_flag,
-                            limited_height=limited_height,
-                            x_dump_truck=x_dump_truck,
-                            y_dump_truck=y_dump_truck,
-                            limited_change_height_land=limited_change_height_land,
-                            limited_change_height_ocean=limited_change_height_ocean,
-                            limited_change_height_land_x_dump=limited_change_height_land_x_dump,
-                            limited_change_height_ocean_x_dump=limited_change_height_ocean_x_dump,
-                            limited_change_height_normal_x_dump=limited_change_height_normal_x_dump,
-                            above_current_line_layer2_min_height=above_current_line_layer2_min_height,
-                            mode_flag=mode_flag,
-                            land_to_centerline=land_to_centerline,
-                            ocean_to_centerline=ocean_to_centerline,
-                            logger=logger,
-                            max_height_var_change =max_height_var_change,
-                            y_offset_land=y_offset_land,
-                            y_offset_ocean=y_offset_ocean,
-                            y_offset_land_xy_dump=y_offset_land_xy_dump,
-                            y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
-                            enable_y_offset_flag=enable_y_offset_flag,
-                            y_grab_expansion_change_flag=y_grab_expansion_change_flag,
-                            square_ranges=square_ranges,
-                            selected_map=selected_map
-                                )
+                    # 有上次点时的抓取（递减屏蔽半径）
+                    capture_point2,capture_point2_layer=calculate_capture_point_with_backoff(
+                        last_capture_point_x,
+                        last_capture_point_y
+                    )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
                     # if abs(capture_point2['x']-capture_point['x'])<0.5:
                     #   logger.info(f'使用上次的抓取点的x坐标{capture_point["x"]}')
