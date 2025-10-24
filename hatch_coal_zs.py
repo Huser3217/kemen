@@ -267,7 +267,9 @@ async def main():
                 ])         
                 
                 points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
-                
+                points_world_z=(points_world[0][2]+points_world[1][2]+points_world[2][2]+points_world[3][2])/4
+                #改变世界坐标系下的z坐标
+                points_world[:,2]=points_world_z
                 hatch_recognize_success=True
                 if not IS_FIRST_TIME and not np.allclose(points_world[:,:2], world_coords_refined[:,:2], atol=2):
                   #比较世界坐标系下的舱口坐标和上一次的舱口坐标是否合理points_world和world_coords_refined
@@ -416,6 +418,7 @@ async def main():
                 k=header_info.get('kValue',1)  #线性函数的斜率
                 b=header_info.get('bValue',-1)  #线性函数的截距
                 config_height_diff=header_info.get('heightDiff',3.5)  #高度差
+                selected_line=header_info.get('selected_line',0)  #选中的线
 
 
 
@@ -499,8 +502,11 @@ async def main():
                 y_back=max(points_world[0][1],points_world[3][1])
                 if current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
                     y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
-                else:
+                if config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
                     y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
+
+                if current_layer>=config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion3
                 y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                 y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
                 logger.info(f"x_positive为：{x_positive}")
@@ -550,6 +556,35 @@ async def main():
                         block_width=block_width,
                         block_length=block_length,
                     )
+
+
+
+                line1_x_negative=x_negative-line_width/2
+                line1_x_positive=x_negative+line_width/2
+                line2_x_negative=x_positive-line_width/2
+                line2_x_positive=x_positive+line_width/2
+                lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
+                
+                #剩下的x轴范围,两边都预留了半个line_gap的宽度
+                x_remaining=line2_x_negative-line1_x_positive-line_gap
+                
+                #计算可以生成多少条线
+                num_lines=int(x_remaining/(line_width+line_gap))
+                #所以现在每条线的宽度为
+                line_w=x_remaining/num_lines
+                
+                for i in range(num_lines):
+                    #线的中心点位置
+                    line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
+                
+                    lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
+                
+                
+                #给这些线编号，从负方向开始
+                lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
+
+
+                lines_dict_tojava = {idx + 1: line for idx, line in enumerate(lines_sorted)}
                 if mode_flag==4:
                     
                     
@@ -559,29 +594,6 @@ async def main():
 
 
                 else:
-                    line1_x_negative=x_negative-line_width/2
-                    line1_x_positive=x_negative+line_width/2
-                    line2_x_negative=x_positive-line_width/2
-                    line2_x_positive=x_positive+line_width/2
-                    lines=[[line1_x_negative,line1_x_positive],[line2_x_negative,line2_x_positive]]
-                    
-                    #剩下的x轴范围,两边都预留了半个line_gap的宽度
-                    x_remaining=line2_x_negative-line1_x_positive-line_gap
-                    
-                    #计算可以生成多少条线
-                    num_lines=int(x_remaining/(line_width+line_gap))
-                    #所以现在每条线的宽度为
-                    line_w=x_remaining/num_lines
-                    
-                    for i in range(num_lines):
-                        #线的中心点位置
-                        line_center=(line1_x_positive+line_gap/2)+i*line_w+0.5*line_w
-                    
-                        lines.append([line_center-0.5*line_width,line_center+0.5*line_width])
-                    
-                    
-                    #给这些线编号，从负方向开始
-                    lines_sorted = sorted(lines, key=lambda l: (l[0] + l[1]) / 2)
                     # 给每条线编号（从负方向到正方向）
                     lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
                     for num, (x_min, x_max) in lines_dict.items():
@@ -724,6 +736,8 @@ async def main():
                     #     if current_machine_position>=x_min and current_machine_position<=x_max:
                     #         current_line=num
                     #         break
+
+                    
                     if current_line is None:
                         
                     
@@ -736,8 +750,11 @@ async def main():
                 
                     else:
                         logger.info(f"大车当前处于第{current_line}条线")
-                
-                
+
+                    if selected_line!=0 and selected_line in lines_dict.keys():
+                        current_line=selected_line
+                        logger.info(f"用户选择了第{selected_line}条线，即将前往{selected_line}线")
+                    
                     #计算当前大车所在线的高度和其他所有线的差值，如果有一个差值大于3.5米的话，且当前线所在高度是相减的两者之间较小的话，就启动换线.或者当前线的平均高度已经到了保留的高度，也启动换线
                     current_line_height=line_heights_dict[current_line]
                     #是否需要换线
@@ -848,10 +865,14 @@ async def main():
 
 
 
-                    if current_line_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
-                        y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
-                    else:
-                        y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
+                if current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
+                if config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
+
+                if current_layer>=config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion3
+
                     y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                     y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
 
@@ -1221,6 +1242,7 @@ async def main():
                 coal_pile_data["current_line_layer"]=current_line_layer
                 coal_pile_data["capture_point_layer_min_height"]=float(capture_point_layer_min_height)
                 coal_pile_data["square_ranges"]=square_ranges
+                coal_pile_data["lines_dict_tojava"]=lines_dict_tojava
                 
                 
                  #发给java后台的数据,抓取点坐标，current_line_layer,capture_point_layer,min_height
@@ -1244,6 +1266,7 @@ async def main():
                     'blocks_heights':blocks_heights_list,
                     'current_coal_layer':int(current_layer),
                     'nine_square_block_heights':nine_square_block_heights,
+                    'lines_dict_tojava':lines_dict_tojava,
                 }
                
                 #发送给我连接的java服务器

@@ -1,6 +1,7 @@
 
 # 导入所需的库
 import logging
+import select
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 logging.getLogger('PIL').setLevel(logging.WARNING) 
 import laspy 
@@ -2485,7 +2486,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
                 magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
                 last_machine_position,
                 current_machine_position,
-                current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,mode_flag,
+                current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,mode_flag,selected_line,
                 #上次抓取点的坐标
                 last_capture_point_x, last_capture_point_y, last_capture_point_z,
                 # 四个角点坐标 (每个角点3个double值：x, y, z)
@@ -2548,6 +2549,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  Last Machine Position: {last_machine_position}")
     print(f"  Current Machine Position: {current_machine_position}")
     print(f"  Mode Flag: {mode_flag}")
+    print(f"  Selected Line: {selected_line}")
     print(f"  Last Capture Point: ({last_capture_point_x:.3f}, {last_capture_point_y:.3f}, {last_capture_point_z:.3f})")
     print(f"  Corner1: ({corner1_x:.3f}, {corner1_y:.3f}, {corner1_z:.3f})")
     print(f"  Corner2: ({corner2_x:.3f}, {corner2_y:.3f}, {corner2_z:.3f})")
@@ -2653,6 +2655,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
             'current_step': current_step,
             'num_points': num_points,
             'mode_flag': mode_flag,
+            'selected_line': selected_line,
             #上次抓取点的坐标
             'last_capture_point': {'x': last_capture_point_x, 'y': last_capture_point_y, 'z': last_capture_point_z},
             'hatch_corners': {
@@ -3739,8 +3742,8 @@ def get_next_line(current_line, direction, line_numbers, tried_lines=None):
   if tried_lines is None:
       tried_lines = set()
   
-  # 如果总线数大于3条，使用新的换线策略
-  if total_lines > 3:
+  # 如果总线数大于4条，使用新的换线策略
+  if total_lines > 4:
       # 最左边的线的右边第一条线（第2条线）优先向左侧换线
       if current_line == min_line + 1 and (current_line - 1) not in tried_lines:  # 第2条线且左边未尝试
           next_line = current_line - 1
@@ -3757,7 +3760,7 @@ def get_next_line(current_line, direction, line_numbers, tried_lines=None):
               direction *= -1
               next_line = current_line + direction
   else:
-      # 总线数不大于3条时，保持原有逻辑
+      # 总线数不大于4条时，保持原有逻辑
       next_line = current_line + direction
       # 如果next_line不在line_numbers中，但在最大线和最小线的范围内，说明还需要接着换线，直到换的线在line_numbers中
       while next_line not in line_numbers and min_line <= next_line <= max_line:

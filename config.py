@@ -9,7 +9,7 @@ import os
 import struct
 
 
-HEADER_FORMAT = "<4s HHHHIIdd II QQ III 3d 12d 12d 15d I 6d 9b"
+HEADER_FORMAT = "<4s HHHHIIdd II QQ IIII 3d 12d 12d 15d I 6d 9b"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -127,9 +127,14 @@ class GrabPointCalculationConfig_170:
     y_dump_truck=3             #距离小车方向的安全边界的距离阈值，判断是否在小车方向甩斗
 
 
-    y_grab_expansion_change_layer=7
+    
     y_grab_expansion=3.1    #海陆侧向外多延申的距离
-    y_grab_expansion2=4.5   #7层及以下向外多延申的距离
+
+    y_grab_expansion_change_layer=6
+    y_grab_expansion2=3.5  #第六层海侧向外多延申的距离
+
+    y_grab_expansion_change_layer2=7
+    y_grab_expansion3=4.5   #7层及以下向外多延申的距离
 
 
     #分割海陆侧的参数
