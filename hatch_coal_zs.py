@@ -443,8 +443,50 @@ async def main():
                 logger.info(f"当前煤面的高度与舱口高度的差值为：{height_diff}")
 
 
+                if height_diff>=hatch_depth-2:
+                    #异步启动船舱深度测量，不阻塞后续计算
+                    try:
+                        # 保存煤堆点云数据到临时文件，使用进程ID区分
+                        process_id = "170"
+                        temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
+                        np.save(temp_data_file, world_coal_pile_points)
+                        logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
+                        
+                        # 启动 measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
+                        script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
+                        subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
+                        # 在需要使用舱底深度的地方
+
+                    except Exception as e:
+                        logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
 
 
+                    try:
+                        depth_result = get_bottom_depth_result(process_id="170", current_hatch=current_hatch)
+                        if depth_result:
+                            bottom_depth = depth_result['bottom_depth']
+                            is_depth_valid = depth_result['is_valid']
+                            
+                            if is_depth_valid:
+                            
+                                hatch_depth_data={
+                                'type':5,
+                                'current_hatch': int(current_hatch),
+                                'hatch_depth': float(depth_result['hatch_depth']),
+                                        }
+                        
+                                await ws_manager.send_message(json.dumps(convert_numpy_types(hatch_depth_data), ensure_ascii=False))
+                                print(f"发送给java后台的数据:{hatch_depth_data}")
+
+                            else:
+                                logger.info("获取到的舱底深度数据无效,不是舱底平面")
+
+                        else:
+                            logger.info("暂未获取到舱底深度数据")
+                    
+                    except Exception as e:
+                        logger.error(f"获取舱底深度数据时出错: {e}")
 
 
 
@@ -792,27 +834,9 @@ async def main():
                                         break
                             if len(tried_lines)==total_lines and need_change_line:
                                 work_completed=True
-                            #异步启动船舱深度测量，不阻塞后续计算
-                                try:
-                                    # 保存煤堆点云数据到临时文件，使用进程ID区分
-                                    process_id = "170"
-                                    temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
-                                    np.save(temp_data_file, world_coal_pile_points)
-                                    logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
-                                    
-                                    # 启动 measure_depth.py脚本，传递数据文件路径、舱口号和进程ID
-                                    script_path = os.path.join(os.path.dirname(__file__), "measure_depth.py")
-                                    subprocess.Popen([sys.executable, script_path, temp_data_file, str(current_hatch), str(hatch_height), process_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                    logger.info(f"已异步启动船舱深度测量任务 measure_depth.py，舱口号: {current_hatch}，进程ID: {process_id}")
-                                    # 在需要使用舱底深度的地方
-
-                                except Exception as e:
-                                    logger.exception(f"异步启动船舱深度测量失败: {e}",exc_info=True)
 
                                 #抛出一个指定的异常
                                 raise Exception("换线失败，已经尝试过所有的线，作业结束")
-
-                                break
 
                                         
                 logger.info(f"当前线为第{current_line}条线，当前线的边界位置为：{lines_dict[current_line]}")
@@ -1124,10 +1148,8 @@ async def main():
                 end_time_grab=time.time()
                 logger.info(f"计算时间为：{end_time_grab-start_time_grab}")                
                 
-
-
                 
-                
+
                 
 
                 
@@ -1165,28 +1187,7 @@ async def main():
 
                     await broadcast_server.broadcast_coal_pile_data(coal_pile_data)
 
-                    time.sleep(5)
-                    depth_result = get_bottom_depth_result(process_id="170", current_hatch=current_hatch)
-                    if depth_result:
-                        bottom_depth = depth_result['bottom_depth']
-                        is_depth_valid = depth_result['is_valid']
-                        
-                        if is_depth_valid:
-                        
-                            hatch_depth_data={
-                            'type':5,
-                            'current_hatch': int(current_hatch),
-                            'hatch_depth': float(depth_result['hatch_depth']),
-                                    }
-                    
-                            await ws_manager.send_message(json.dumps(convert_numpy_types(hatch_depth_data), ensure_ascii=False))
-                            print(f"发送给java后台的数据:{hatch_depth_data}")
 
-                        else:
-                            logger.info("获取到的舱底深度数据无效,不是舱底平面")
-
-                    else:
-                        logger.info("暂未获取到舱底深度数据")
 
 
                 else:
