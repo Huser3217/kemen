@@ -34,6 +34,8 @@ import subprocess
 import config
 
 from tools import *
+
+
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
@@ -158,6 +160,10 @@ async def main():
                 last_capture_point_y = last_capture_point.get('y', 0)
                 last_capture_point_z = last_capture_point.get('z', 0)
                 
+
+
+                if last_capture_point_x==0 and last_capture_point_y==0 and last_capture_point_z==0:
+                    persisted_line_change_direction = -1
                 
                 if current_step != 1:
                     # print("当前计算信号不是1，跳过处理")    
@@ -199,8 +205,8 @@ async def main():
                     
                     world_center_result = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)
                     world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
-                    # world_center_x,world_center_y,world_center_z = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
-                    world_center_x = world_center_x+(last_machine_position-current_machine_position)
+                    # world_center_x,world_center_y,world_center_last_machine_positionz = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
+                    world_center_x = world_center_x+(-current_machine_position)
                     world_point = np.array([
                         [world_center_x,world_center_y,world_center_z]
                     ])
@@ -514,40 +520,15 @@ async def main():
                 logger.info(f"y_ocean为：{y_ocean}")
                 logger.info(f"y_land为：{y_land}")
                 
-                # #第一条线的位置
-                
-                # line1_x_negative=current_machine_position-line_width/2
-                # line1_x_positive=current_machine_position+line_width/2
-                
-                # lines= [[line1_x_negative,line1_x_positive]]
-                
-                # #向x轴负方向生成线
-                # negative_edge=line1_x_negative
-                # while True:
-                #   next_negative_edge=negative_edge-(line_width+line_gap)
-                #   if next_negative_edge>=x_negative:
-                #     lines.append([next_negative_edge,next_negative_edge+line_width])
-                #     negative_edge=next_negative_edge
-                #   else:
-                #     break
-                
-                # #向x轴正方向生成线
-                # positive_edge=line1_x_positive
-                # while True:
-                #   next_positive_edge=positive_edge+(line_width+line_gap)
-                #   if next_positive_edge<=x_positive:
-                #     lines.append([next_positive_edge-line_width,next_positive_edge])
-                #     positive_edge=next_positive_edge
-                #   else:
-                #     break
-                
-                #现在先以x_negative和x_positive为线的中心基准，生成两条线
-                square_ranges=[]
-                nine_square_block_heights=[]
+                x_grid_num=5    
+                y_grid_num=3
 
-                nine_squarecalculate(
+                square_ranges=[]
+                grid_block_heights=[]
+            
+                grid_calculate(
                         square_ranges=square_ranges,
-                        nine_square_block_heights=nine_square_block_heights,
+                        grid_block_heights=grid_block_heights,
                         world_coal_pile_points=world_coal_pile_points,
                         x_negative=x_negative-2,
                         x_positive=x_positive+2,
@@ -555,7 +536,9 @@ async def main():
                         y_land=y_land,
                         block_width=block_width,
                         block_length=block_length,
-                    )
+                        x_grid_num=x_grid_num,
+                        y_grid_num=y_grid_num
+                     )
 
 
 
@@ -590,9 +573,9 @@ async def main():
                     
                     lines_dict={}
 
-                    lines_dict={1:(square_ranges[0]["x_min"],square_ranges[0]["x_max"]),2:(square_ranges[3]["x_min"],square_ranges[3]["x_max"]),3:(square_ranges[6]["x_min"],square_ranges[6]["x_max"])}
-
-
+                    for i in range(x_grid_num):
+                        idx = i * y_grid_num  # y_grid_num的整数倍索引
+                        lines_dict[i+1] = (square_ranges[idx]["x_min"], square_ranges[idx]["x_max"])
                 else:
                     # 给每条线编号（从负方向到正方向）
                     lines_dict = {idx + 1: line for idx, line in enumerate(lines_sorted)}
@@ -643,7 +626,7 @@ async def main():
                     lines_with_map=[]
                     #遍历selected_map判断这些格子分别处于哪条线
                     for index in selected_map:
-                        line=index//3+1
+                        line=index//y_grid_num+1
                         if line not in lines_with_map:
                             lines_with_map.append(line)
 
@@ -693,6 +676,7 @@ async def main():
                     if len(lines_with_map)==1 and need_change_line:
                         work_completed=True
                         need_change_line=False
+                        raise Exception("换线失败，已经尝试过所有的线，作业结束")
                    
                     if need_change_line:
                   # 如果需要换线，就循环找下一条合适的线
@@ -878,10 +862,10 @@ async def main():
 
 
                     square_ranges=[]
-                    nine_square_block_heights=[]
-                    nine_squarecalculate(
+                    grid_block_heights=[]
+                    grid_calculate(
                     square_ranges=square_ranges,
-                    nine_square_block_heights=nine_square_block_heights,
+                    grid_block_heights=grid_block_heights,
                     world_coal_pile_points=world_coal_pile_points,
                     x_negative=x_negative-2,
                     x_positive=x_positive+2,
@@ -889,6 +873,8 @@ async def main():
                     y_land=y_land,
                     block_width=block_width,
                     block_length=block_length,
+                    x_grid_num=x_grid_num,
+                    y_grid_num=y_grid_num
                       )
 
 
@@ -1016,8 +1002,11 @@ async def main():
                                 y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
                                 enable_y_offset_flag=enable_y_offset_flag,
                                 y_grab_expansion_change_flag=y_grab_expansion_change_flag,
+                                x_grid_num=x_grid_num,
+                                y_grid_num=y_grid_num,
                                 square_ranges=square_ranges,
-                                selected_map=selected_map
+                                selected_map=selected_map,
+                                grid_block_heights=grid_block_heights,
                             )
                         except Exception as e:
                             last_error = e
@@ -1071,8 +1060,11 @@ async def main():
                         y_offset_ocean_xy_dump=y_offset_ocean_xy_dump,
                         enable_y_offset_flag=enable_y_offset_flag,
                         y_grab_expansion_change_flag=y_grab_expansion_change_flag,
+                        x_grid_num=x_grid_num,
+                        y_grid_num=y_grid_num,
                         square_ranges=square_ranges,
-                        selected_map=selected_map
+                        selected_map=selected_map,
+                        grid_block_heights=grid_block_heights,
                     )
 
                 if need_calculate_two:
@@ -1166,7 +1158,7 @@ async def main():
                     }
                
                     #发送给我连接的java服务器
-                    json_message = json.dumps(to_java_data, ensure_ascii=False)
+                    json_message = json.dumps(convert_numpy_types(to_java_data), ensure_ascii=False)
 
                     await ws_manager.send_message(json_message)
                     print(f"发送给java后台的数据:{to_java_data}")
@@ -1187,7 +1179,7 @@ async def main():
                             'hatch_depth': float(depth_result['hatch_depth']),
                                     }
                     
-                            await ws_manager.send_message(json.dumps(hatch_depth_data, ensure_ascii=False))
+                            await ws_manager.send_message(json.dumps(convert_numpy_types(hatch_depth_data), ensure_ascii=False))
                             print(f"发送给java后台的数据:{hatch_depth_data}")
 
                         else:
@@ -1227,7 +1219,8 @@ async def main():
                         }
                 
                         # 发送给我连接的java服务器
-                        json_message = json.dumps(to_java_data, ensure_ascii=False)
+                        json_message = json.dumps(convert_numpy_types(to_java_data), ensure_ascii=False)
+
                         await ws_manager.send_message(json_message)
                         print(f"发送给java后台的数据:{to_java_data}")
  
@@ -1265,12 +1258,13 @@ async def main():
                     'mode_flag':mode_flag,
                     'blocks_heights':blocks_heights_list,
                     'current_coal_layer':int(current_layer),
-                    'nine_square_block_heights':nine_square_block_heights,
+                    'grid_block_heights':grid_block_heights,
                     'lines_dict_tojava':lines_dict_tojava,
                 }
                
                 #发送给我连接的java服务器
-                json_message = json.dumps(to_java_data, ensure_ascii=False)
+               
+                json_message = json.dumps(convert_numpy_types(to_java_data), ensure_ascii=False)
 
                 await ws_manager.send_message(json_message)
                 print(f"发送给java后台的数据:{to_java_data}")

@@ -2503,7 +2503,9 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
                 hatchDepth,retainHeight,lineGap,expansionXFront,expansionYFront,expansionXBack,expansionYBack,
                 planeThreshold,heightDiff,signFlag,kValue,bValue,planeDistance,bevelDistance,blockWidth,blockLength,
                 block1_selection,block2_selection,block3_selection,block4_selection,
-                block5_selection,block6_selection,block7_selection,block8_selection,block9_selection
+                block5_selection,block6_selection,block7_selection,block8_selection,block9_selection,
+                block10_selection,block11_selection,block12_selection,block13_selection,block14_selection,
+                block15_selection
             ) = header_data
     except struct.error as e:
         print(f"解析头部失败: {e}")
@@ -2591,6 +2593,12 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  block7_selection: {block7_selection}")
     print(f"  block8_selection: {block8_selection}")
     print(f"  block9_selection: {block9_selection}")
+    print(f"  block10_selection: {block10_selection}")
+    print(f"  block11_selection: {block11_selection}")
+    print(f"  block12_selection: {block12_selection}")
+    print(f"  block13_selection: {block13_selection}")
+    print(f"  block14_selection: {block14_selection}")
+    print(f"  block15_selection: {block15_selection}")
 
     print("------------------")
 
@@ -2695,7 +2703,9 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
         'blockLength': blockLength,
         'selection_blocks':[
             block1_selection,block2_selection,block3_selection,block4_selection,
-            block5_selection,block6_selection,block7_selection,block8_selection,block9_selection
+            block5_selection,block6_selection,block7_selection,block8_selection,block9_selection,
+            block10_selection,block11_selection,block12_selection,block13_selection,block14_selection,
+            block15_selection
         ],
         'extensions': extensions,  # 添加扩展区数据
         },
@@ -2803,7 +2813,20 @@ async def get_point_cloud_from_websocket_persistent(ws_manager,HEADER_SIZE,POINT
                 continue
 
 
-
+def convert_numpy_types(obj):
+    """递归转换numpy数据类型为Python原生类型"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj
 
 # 添加WebSocket服务器类
 class CoalPileBroadcastServer:
@@ -2832,6 +2855,21 @@ class CoalPileBroadcastServer:
             self.clients.discard(websocket)
             logger.info(f"客户端 {client_info} 已移除, 当前连接数: {len(self.clients)}")
     
+    def convert_numpy_types(self, obj):
+        """递归转换numpy数据类型为Python原生类型"""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: self.convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.convert_numpy_types(item) for item in obj]
+        else:
+            return obj
+
     async def broadcast_coal_pile_data(self, coal_pile_data):
         """广播煤堆数据到所有连接的客户端"""
         if not self.clients:
@@ -2842,7 +2880,7 @@ class CoalPileBroadcastServer:
         broadcast_msg = {
             "type": "coal_pile_broadcast",
             "timestamp": datetime.now().isoformat(),
-            "data": coal_pile_data
+            "data": self.convert_numpy_types(coal_pile_data)
         }
         
         message = json.dumps(broadcast_msg, ensure_ascii=False)
@@ -3057,7 +3095,9 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height_land,limited_change_height_ocean,limited_change_height_land_x_dump,limited_change_height_ocean_x_dump,limited_change_height_normal_x_dump,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset_land,y_offset_ocean,y_offset_land_xy_dump,y_offset_ocean_xy_dump,enable_y_offset_flag,y_grab_expansion_change_flag,square_ranges=[],selected_map=[],
+                          x_dump_truck,y_dump_truck,limited_change_height_land,limited_change_height_ocean,limited_change_height_land_x_dump,limited_change_height_ocean_x_dump,limited_change_height_normal_x_dump,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset_land,y_offset_ocean,y_offset_land_xy_dump,y_offset_ocean_xy_dump,enable_y_offset_flag,y_grab_expansion_change_flag,x_grid_num,y_grid_num,
+                          square_ranges=[],selected_map=[],grid_block_heights=[]
+                          
                           
                           ):
     """
@@ -3099,18 +3139,21 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         #判断选中的分块有哪些在这条线上
         selected_blocks = []
         for index in selected_map:
-            line=index//3+1
+            line=index//y_grid_num+1
             if line==current_line:
                 selected_blocks.append(index)
-                logger.info(f"当前线上可以作业的块为{[block+1 for block in selected_blocks]}")
-
+                
+        logger.info(f"当前线上可以作业的块为{[block+1 for block in selected_blocks]}")
         current_capture_block=-1        
         if(len(selected_blocks)==1):
             current_capture_block=selected_blocks[0]
             logger.info(f"当前抓取的分块为{current_capture_block+1}")
 
+        elif len(selected_blocks)==y_grid_num:
+            mode_flag_4_mode=True
+
         #判断上次抓取点是否在selected_blocks中
-        if len(selected_blocks)==2:
+        else:
             if lines_dict[current_line][0]<=exclude_x_center<=lines_dict[current_line][1]:
                 last_capture_block=-1
                 #判断上次抓取点是否在selected_blocks中
@@ -3119,18 +3162,23 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                         last_capture_block=block   #上次抓取的块
                         logger.info(f"上次抓取的分块为{last_capture_block+1}")
 
-
+                current_optional_blocks=[]
                 #现在这个抓取点则在另一块 
                 for block in selected_blocks:
                     if block!=last_capture_block:
-                        current_capture_block=block   #当前抓取的分块
-                        logger.info(f"当前抓取的分块为{current_capture_block+1}")
+                            #存储剩下的可以选择的块
+                        current_optional_blocks.append(block)
+                
+                #选择current_optional_blocks中的高度最高的那个块作为当前抓取的分块
+                current_capture_block=max(current_optional_blocks,key=lambda x:grid_block_heights[x])
+                logger.info(f"当前抓取的分块为{current_capture_block+1}")
+
+
             else:
                 current_capture_block=selected_blocks[0]
                 logger.info(f"当前抓取的分块为{current_capture_block+1}")
 
-        if len(selected_blocks)==3:
-            mode_flag_4_mode=True
+            
         if current_capture_block!=-1:
                 logger.info(f"当前抓取的分块为{current_capture_block+1}")
                 current_line_points = world_coal_pile_points[
@@ -3569,18 +3617,121 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
 
 
 
-def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile_points,x_negative,x_positive,y_ocean,y_land,block_width,block_length):
-    """
-    将这个区域分成九宫格
-    """
-    # 计算九宫格的边长
-    square_side_length = (x_positive - x_negative) / 3
-    square_side_width = (y_ocean-y_land ) / 3
+# def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile_points,x_negative,x_positive,y_ocean,y_land,block_width,block_length):
+#     """
+#     将这个区域分成九宫格
+#     """
+#     # 计算九宫格的边长
+#     square_side_length = (x_positive - x_negative) / 3
+#     square_side_width = (y_ocean-y_land ) / 3
 
-    #计算九宫格的每格范围
+#     #计算九宫格的每格范围
 
-    for i in range(3):
-        for j in range(3):
+#     for i in range(3):
+#         for j in range(3):
+#             x_min = x_negative + i * square_side_length
+#             x_max = x_min + square_side_length
+#             y_min = y_land + j * square_side_width
+#             y_max = y_min + square_side_width
+#             square_ranges.append({
+#                                 "x_min": float(x_min),
+#                                 "x_max": float(x_max),
+#                                 "y_min": float(y_min),
+#                                 "y_max": float(y_max)
+#                             })
+
+
+#     #判断这些范围的y_max-y_min是否大于或等于6米，x_max-x_min是否大于等于4米。逐个处理格子，我需要知道这是第几个格子
+#     for i, square_range in enumerate(square_ranges):
+#         x_min = square_range["x_min"]
+#         x_max = square_range["x_max"]
+#         y_min = square_range["y_min"]
+#         y_max = square_range["y_max"]
+
+#         if i==0 or i==1 or i==2 or i==3 or i==4 or i==5:
+#             if(x_max-x_min<4):
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
+#                 x_max=x_min+4
+#                 square_ranges[i]["x_max"]=x_max
+#              #如果x_max-x_min不是block_width的整数倍，调整x_max
+#             if (x_max - x_min) % block_width != 0:
+#                 x_max = x_min + math.ceil((x_max - x_min) / block_width) * block_width
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max - x_min:.3f}，必须是 block_width 的整数倍")
+#                 square_ranges[i]["x_max"] = x_max
+
+#         if i==6 or i==7 or i==8:
+#             if(x_max-x_min<4):
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
+#                 x_min=x_max-4
+#                 square_ranges[i]["x_min"]=x_min
+                
+#              #如果x_max-x_min不是block_width的整数倍，调整x_min
+#             if (x_max - x_min) % block_width != 0:
+#                 x_min=x_max-math.ceil((x_max-x_min)/block_width)*block_width
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须是 block_width 的整数倍")
+#                 square_ranges[i]["x_min"]=x_min
+
+#         if i==0 or i==3 or i==6 or i==1 or i==4 or i==7:
+#             if(y_max-y_min<6):
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
+#                 y_max=y_min+6
+#                 square_ranges[i]["y_max"]=y_max
+#              #如果y_max-y_min不是block_length的整数倍，调整y_max
+#             if (y_max - y_min) % block_length != 0:
+#                 y_max=y_min+math.ceil((y_max-y_min)/block_length)*block_length
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是 block_length 的整数倍")
+#                 square_ranges[i]["y_max"]=y_max
+        
+#         if i==2 or i==5 or i==8:
+#             if(y_max-y_min<6):
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
+#                 y_min=y_max-6
+#                 square_ranges[i]["y_min"]=y_min
+#              #如果y_max-y_min不是block_length的整数倍，调整y_min
+#             if (y_max - y_min) % block_length != 0:
+#                 y_min=y_max-math.ceil((y_max-y_min)/block_length)*block_length
+#                 logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是 block_length 的整数倍")
+#                 square_ranges[i]["y_min"]=y_min
+    
+#     #打印
+#     for i, square_range in enumerate(square_ranges):
+#         x_min = square_range["x_min"]
+#         x_max = square_range["x_max"]
+#         y_min = square_range["y_min"]
+#         y_max = square_range["y_max"]
+#         logger.info(f"第{i+1}个格子的范围: x_min={x_min:.3f}, x_max={x_max:.3f}, y_min={y_min:.3f}, y_max={y_max:.3f}")
+
+#     #计算这些格子内点云的平均高度,存入nine_square_block_heights
+#     for i, square_range in enumerate(square_ranges):
+#         x_min = square_range["x_min"]
+#         x_max = square_range["x_max"]
+#         y_min = square_range["y_min"]
+#         y_max = square_range["y_max"]
+#         # 筛选出在当前格子内的点
+#         mask = (
+#             (world_coal_pile_points[:, 0] >= x_min) & (world_coal_pile_points[:, 0] < x_max) &
+#             (world_coal_pile_points[:, 1] >= y_min) & (world_coal_pile_points[:, 1] < y_max)
+#         )
+#         # 计算平均高度
+#         avg_height = np.mean(world_coal_pile_points[mask, 2])
+#         nine_square_block_heights.append(avg_height)
+#         logger.info(f"第{i+1}个格子内点云的平均高度: {avg_height:.3f}米")
+
+
+
+
+def grid_calculate(square_ranges,grid_block_heights,world_coal_pile_points,x_negative,x_positive,y_ocean,y_land,block_width,block_length,x_grid_num,y_grid_num):
+    """
+    将这个区域分成3×5格子
+    """
+    # 计算格子的边长
+    square_side_length = (x_positive - x_negative) / x_grid_num  # x方向分成x_grid_num份
+    square_side_width = (y_ocean-y_land ) / y_grid_num  # y方向分成y_grid_num份
+
+    #计算格子的每格范围
+
+    for i in range(x_grid_num):  # x方向x_grid_num份
+        for j in range(y_grid_num):  # y方向y_grid_num份
             x_min = x_negative + i * square_side_length
             x_max = x_min + square_side_length
             y_min = y_land + j * square_side_width
@@ -3600,18 +3751,20 @@ def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile
         y_min = square_range["y_min"]
         y_max = square_range["y_max"]
 
-        if i==0 or i==1 or i==2 or i==3 or i==4 or i==5:
+        # 对于前四列的格子（索引0-11），调整x_max
+        if i < (x_grid_num-1)*y_grid_num:
             if(x_max-x_min<4):
                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
                 x_max=x_min+4
                 square_ranges[i]["x_max"]=x_max
              #如果x_max-x_min不是block_width的整数倍，调整x_max
-        if (x_max - x_min) % block_width != 0:
-            x_max = x_min + math.ceil((x_max - x_min) / block_width) * block_width
-            logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max - x_min:.3f}，必须是 block_width 的整数倍")
-            square_ranges[i]["x_max"] = x_max
+            if (x_max - x_min) % block_width != 0:
+                x_max = x_min + math.ceil((x_max - x_min) / block_width) * block_width
+                logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max - x_min:.3f}，必须是 block_width 的整数倍")
+                square_ranges[i]["x_max"] = x_max
 
-        if i==6 or i==7 or i==8:
+        # 对于最后一列的格子（索引12-14），调整x_min
+        else:
             if(x_max-x_min<4):
                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须大于等于4米")
                 x_min=x_max-4
@@ -3623,27 +3776,34 @@ def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile
                 logger.info(f"第{i+1}个格子的范围不符合要求，x_max-x_min={x_max-x_min:.3f}，必须是 block_width 的整数倍")
                 square_ranges[i]["x_min"]=x_min
 
-        if i==0 or i==3 or i==6 or i==1 or i==4 or i==7:
-            if(y_max-y_min<6):
-                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
-                y_max=y_min+6
-                square_ranges[i]["y_max"]=y_max
-             #如果y_max-y_min不是block_length的整数倍，调整y_max
+        # y方向调整
+        if i%y_grid_num<=y_grid_num-2:  # 第二行和第三行，调整 y_max
+            if (y_max - y_min) < 6:
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max - y_min:.3f}，必须大于等于6米")
+                y_max = y_min + 6
+                square_ranges[i]["y_max"] = y_max
+                
             if (y_max - y_min) % block_length != 0:
-                y_max=y_min+math.ceil((y_max-y_min)/block_length)*block_length
-                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是 block_length 的整数倍")
-                square_ranges[i]["y_max"]=y_max
-        
-        if i==2 or i==5 or i==8:
-            if(y_max-y_min<6):
-                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须大于等于6米")
-                y_min=y_max-6
-                square_ranges[i]["y_min"]=y_min
-             #如果y_max-y_min不是block_length的整数倍，调整y_min
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max - y_min:.3f}，必须是 block_length 的整数倍")
+
+                adjusted_height = math.ceil((y_max - y_min) / block_length) * block_length
+                y_max = y_min + adjusted_height
+                square_ranges[i]["y_max"] = y_max
+
+        elif i%y_grid_num==y_grid_num-1:  # 第一行，调整 y_min
+            if (y_max - y_min) < 6:
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max - y_min:.3f}，必须大于等于6米")
+
+                y_min = y_max - 6
+                square_ranges[i]["y_min"] = y_min
             if (y_max - y_min) % block_length != 0:
-                y_min=y_max-math.ceil((y_max-y_min)/block_length)*block_length
-                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max-y_min:.3f}，必须是 block_length 的整数倍")
-                square_ranges[i]["y_min"]=y_min
+                logger.info(f"第{i+1}个格子的范围不符合要求，y_max-y_min={y_max - y_min:.3f}，必须是 block_length 的整数倍")
+
+                adjusted_height = math.ceil((y_max - y_min) / block_length) * block_length
+                y_min = y_max - adjusted_height
+                square_ranges[i]["y_min"] = y_min
+
+
     
     #打印
     for i, square_range in enumerate(square_ranges):
@@ -3653,7 +3813,7 @@ def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile
         y_max = square_range["y_max"]
         logger.info(f"第{i+1}个格子的范围: x_min={x_min:.3f}, x_max={x_max:.3f}, y_min={y_min:.3f}, y_max={y_max:.3f}")
 
-    #计算这些格子内点云的平均高度,存入nine_square_block_heights
+    #计算这些格子内点云的平均高度,存入grid_block_heights
     for i, square_range in enumerate(square_ranges):
         x_min = square_range["x_min"]
         x_max = square_range["x_max"]
@@ -3665,13 +3825,9 @@ def nine_squarecalculate(square_ranges,nine_square_block_heights,world_coal_pile
             (world_coal_pile_points[:, 1] >= y_min) & (world_coal_pile_points[:, 1] < y_max)
         )
         # 计算平均高度
-        avg_height = np.mean(world_coal_pile_points[mask, 2])
-        nine_square_block_heights.append(avg_height)
+        avg_height = float(np.mean(world_coal_pile_points[mask, 2]))
+        grid_block_heights.append(avg_height)
         logger.info(f"第{i+1}个格子内点云的平均高度: {avg_height:.3f}米")
-
-
-
-
 
 
 
