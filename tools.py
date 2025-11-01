@@ -2484,6 +2484,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
         header_data = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
         (
                 magic, version, header_len, point_size, ts_type, frame_id, is_detection_hatch,
+                machine_no,
                 last_machine_position,
                 current_machine_position,
                 current_hatch, current_step, start_ts_raw, end_ts_raw, pkt_count, num_points,mode_flag,selected_line,
@@ -2545,6 +2546,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  Point Size: {point_size}")
     print(f"  Frame ID: {frame_id}")
     print(f"  is_detection_hatch: {is_detection_hatch}")
+    print(f"  Machine No: {machine_no}")
     print(f"  Current Hatch: {current_hatch}")
     print(f"  Current Step: {current_step}")
     print(f"  Number of Points: {num_points}")
@@ -2657,6 +2659,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
             'actual_header_end': header_end,  # 添加实际头部结束位置
             'frame_id': frame_id,
             'is_detection_hatch': is_detection_hatch,
+            'machine_no': machine_no,
             'last_machine_position': last_machine_position,
             'current_machine_position': current_machine_position,
             'current_hatch': current_hatch,
@@ -3095,7 +3098,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
                           y_land, y_ocean, hatch_height, current_line_height, 
                           floor_height, block_width, block_length, line_width,
                           plane_threshold, plane_distance, bevel_distance, Sign, k, b, above_current_line_layer_min_height,enable_limited_flag,limited_height,
-                          x_dump_truck,y_dump_truck,limited_change_height_land,limited_change_height_ocean,limited_change_height_land_x_dump,limited_change_height_ocean_x_dump,limited_change_height_normal_x_dump,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset_land,y_offset_ocean,y_offset_land_xy_dump,y_offset_ocean_xy_dump,enable_y_offset_flag,y_grab_expansion_change_flag,x_grid_num,y_grid_num,
+                          x_dump_truck,y_dump_truck,limited_change_height_land,limited_change_height_ocean,limited_change_height_land_x_dump,limited_change_height_ocean_x_dump,limited_change_height_normal_x_dump,above_current_line_layer2_min_height,mode_flag,land_to_centerline,ocean_to_centerline,logger,max_height_var_change,y_offset_land,y_offset_ocean,y_offset_land_xy_dump,y_offset_ocean_xy_dump,enable_y_offset_flag,x_grid_num,y_grid_num,
                           square_ranges=[],selected_map=[],grid_block_heights=[]
                           
                           
@@ -3556,6 +3559,8 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         if abs(avg_y-y_back)<=y_dump_truck:
             avg_height += limited_change_height_land_x_dump
             logger.info(f"陆侧甩斗，高度增加{limited_change_height_land_x_dump}，改变前为{avg_height-limited_change_height_land_x_dump}，改变后为{avg_height}")
+
+
     if enable_y_offset_flag and x_dump_truck_flag and not y_dump_truck_flag:
         avg_height += limited_change_height_normal_x_dump
         logger.info(f"大车方向甩斗,小车方向不甩斗，高度增加{limited_change_height_normal_x_dump}，改变前为{avg_height-limited_change_height_normal_x_dump}，改变后为{avg_height}")
@@ -3566,7 +3571,7 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
             logger.info(f"高于大车方向甩斗限制的最低高度，高度设置为{limited_height}")
 
 
-    if y_grab_expansion_change_flag:
+    if enable_y_offset_flag:
         if avg_y>=y_front:
             avg_y=y_front
             logger.info(f"y坐标超过了y_front，y坐标设置为{y_front}")

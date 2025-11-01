@@ -50,7 +50,7 @@ logging.getLogger('websockets.server').setLevel(logging.CRITICAL)
 
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-log_file_path = os.path.join(log_dir, "hatch_coal_170_zs.log")
+log_file_path = os.path.join(log_dir, "hatch_coal_160_zs.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -75,10 +75,10 @@ POINT_FORMAT = config.POINT_FORMAT
 POINT_SIZE = config.POINT_SIZE
 
 # WebSocket服务器配置
-SERVER_HOST = config.GrabPointCalculationConfig_170.SERVER_HOST
-SERVER_PORT = config.GrabPointCalculationConfig_170.SERVER_PORT
-SERVER_PATH = config.GrabPointCalculationConfig_170.SERVER_PATH
-USER_ID = config.GrabPointCalculationConfig_170.USER_ID
+SERVER_HOST = config.GrabPointCalculationConfig_160.SERVER_HOST
+SERVER_PORT = config.GrabPointCalculationConfig_160.SERVER_PORT
+SERVER_PATH = config.GrabPointCalculationConfig_160.SERVER_PATH
+USER_ID = config.GrabPointCalculationConfig_160.USER_ID
 URI = f"ws://{SERVER_HOST}:{SERVER_PORT}{SERVER_PATH}?userId={USER_ID}"
 
 
@@ -87,7 +87,7 @@ async def main():
     # 初始化WebSocket管理器
     ws_manager = WebSocketManager(URI,-1,1)
     # 初始化广播服务器
-    broadcast_server = CoalPileBroadcastServer(host=config.GrabPointCalculationConfig_170.BROADCAST_HOST, port=config.GrabPointCalculationConfig_170.BROADCAST_PORT)
+    broadcast_server = CoalPileBroadcastServer(host=config.GrabPointCalculationConfig_160.BROADCAST_HOST, port=config.GrabPointCalculationConfig_160.BROADCAST_PORT)
     
  # 启动广播服务器
     try:
@@ -134,17 +134,17 @@ async def main():
                 importlib.reload(config)
 
 
-                VIS_ORIGINAL_3D = config.GrabPointCalculationConfig_170.VIS_ORIGINAL_3D  # 可视化原始点云
-                VISUALIZE_COARSE_FILTRATION = config.GrabPointCalculationConfig_170.VISUALIZE_COARSE_FILTRATION   # 可视化粗过滤结果
-                VISUALIZE_RECTANGLE = config.GrabPointCalculationConfig_170.VISUALIZE_RECTANGLE  # 可视化矩形检测过程
-                VISUALIZE_FINAL_RESULT = config.GrabPointCalculationConfig_170.VISUALIZE_FINAL_RESULT      # 可视化最终结果
-                visualize_clustered_pcd = config.GrabPointCalculationConfig_170.visualize_clustered_pcd  # 可视化聚类后的结果
-                visualize_coal_points = config.GrabPointCalculationConfig_170.visualize_coal_points  # 可视化煤堆点
+                VIS_ORIGINAL_3D = config.GrabPointCalculationConfig_160.VIS_ORIGINAL_3D  # 可视化原始点云
+                VISUALIZE_COARSE_FILTRATION = config.GrabPointCalculationConfig_160.VISUALIZE_COARSE_FILTRATION   # 可视化粗过滤结果
+                VISUALIZE_RECTANGLE = config.GrabPointCalculationConfig_160.VISUALIZE_RECTANGLE  # 可视化矩形检测过程
+                VISUALIZE_FINAL_RESULT = config.GrabPointCalculationConfig_160.VISUALIZE_FINAL_RESULT      # 可视化最终结果
+                visualize_clustered_pcd = config.GrabPointCalculationConfig_160.visualize_clustered_pcd  # 可视化聚类后的结果
+                visualize_coal_points = config.GrabPointCalculationConfig_160.visualize_coal_points  # 可视化煤堆点
                 # 安装参数
-                translation = config.GrabPointCalculationConfig_170.translation
+                translation = config.GrabPointCalculationConfig_160.translation
                     
                 # 旋转角度 [roll, pitch, yaw] 
-                rotation_angles = config.GrabPointCalculationConfig_170.rotation_angles
+                rotation_angles = config.GrabPointCalculationConfig_160.rotation_angles
                 
                 current_hatch = header_info.get('current_hatch', 0)
                 current_step = header_info.get('current_step', 0)
@@ -224,19 +224,19 @@ async def main():
                 # 调用粗过滤函数
                 coarse_filtered_points = coarse_filtration_point_cloud(
                     original_points,
-                    x_initial_threshold=config.GrabPointCalculationConfig_170.x_initial_threshold, 
-                    x_stat_percentage=config.GrabPointCalculationConfig_170.x_stat_percentage,
-                    x_filter_offset=config.GrabPointCalculationConfig_170.x_filter_offset,
-                    intensity_threshold=config.GrabPointCalculationConfig_170.intensity_threshold, #强度
-                    x_upper_bound_adjustment=config.GrabPointCalculationConfig_170.x_upper_bound_adjustment,
+                    x_initial_threshold=config.GrabPointCalculationConfig_160.x_initial_threshold, 
+                    x_stat_percentage=config.GrabPointCalculationConfig_160.x_stat_percentage,
+                    x_filter_offset=config.GrabPointCalculationConfig_160.x_filter_offset,
+                    intensity_threshold=config.GrabPointCalculationConfig_160.intensity_threshold, #强度
+                    x_upper_bound_adjustment=config.GrabPointCalculationConfig_160.x_upper_bound_adjustment,
                     visualize_coarse_filtration=VISUALIZE_COARSE_FILTRATION)
                 
                 
                 refined_box_corners_yz=find_rectangle_by_histogram_method(
                     coarse_filtered_points[:,:3],
-                    pixel_size=config.GrabPointCalculationConfig_170.pixel_size,
-                    kernel_size=config.GrabPointCalculationConfig_170.kernel_size,
-                    white_threshold=config.GrabPointCalculationConfig_170.white_threshold,
+                    pixel_size=config.GrabPointCalculationConfig_160.pixel_size,
+                    kernel_size=config.GrabPointCalculationConfig_160.kernel_size,
+                    white_threshold=config.GrabPointCalculationConfig_160.white_threshold,
                     radar_center_y=radar_center_y,
                     radar_center_z=radar_center_z,
                     is_first_time=IS_FIRST_TIME,
@@ -321,10 +321,10 @@ async def main():
 
                 world_coal_pile_points = segment_coal_pile_world_points(
                     original_world_points, points_world,
-                    eps_coal = config.GrabPointCalculationConfig_170.eps_coal,
-                    min_samples_coal = config.GrabPointCalculationConfig_170.min_samples_coal,
-                    z_changes=config.GrabPointCalculationConfig_170.z_changes,
-                    xy_shrink_amount=config.GrabPointCalculationConfig_170.xy_shrink_amount,
+                    eps_coal = config.GrabPointCalculationConfig_160.eps_coal,
+                    min_samples_coal = config.GrabPointCalculationConfig_160.min_samples_coal,
+                    z_changes=config.GrabPointCalculationConfig_160.z_changes,
+                    xy_shrink_amount=config.GrabPointCalculationConfig_160.xy_shrink_amount,
                     visualize_dbscan=visualize_clustered_pcd
                         )
 
@@ -426,7 +426,7 @@ async def main():
                     #异步启动船舱深度测量，不阻塞后续计算
                     try:
                         # 保存煤堆点云数据到临时文件，使用进程ID区分
-                        process_id = "170"
+                        process_id = "160"
                         temp_data_file = os.path.join(os.path.dirname(__file__), f"temp_coal_pile_data_{process_id}.npy")
                         np.save(temp_data_file, world_coal_pile_points)
                         logger.info(f"已保存煤堆点云数据到临时文件: {temp_data_file}")
@@ -442,7 +442,7 @@ async def main():
 
 
                     try:
-                        depth_result = get_bottom_depth_result(process_id="170", current_hatch=current_hatch)
+                        depth_result = get_bottom_depth_result(process_id="160", current_hatch=current_hatch)
                         if depth_result:
                             bottom_depth = depth_result['bottom_depth']
                             is_depth_valid = depth_result['is_valid']
@@ -527,13 +527,13 @@ async def main():
                 
                 y_front=min(points_world[1][1],points_world[2][1])
                 y_back=max(points_world[0][1],points_world[3][1])
-                if current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
-                if config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
+                if current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
+                if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion2
 
-                if current_layer>=config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion3
+                if current_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion3
                 y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                 y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
                 logger.info(f"x_positive为：{x_positive}")
@@ -852,13 +852,13 @@ async def main():
 
 
 
-                if current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion
-                if config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion2
+                if current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
+                if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion2
 
-                if current_layer>=config.GrabPointCalculationConfig_170.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_170.y_grab_expansion3
+                if current_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion3
 
                     y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                     y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
@@ -883,26 +883,26 @@ async def main():
 
 
 
-                limited_layers=config.GrabPointCalculationConfig_170.limited_layers
-                limited_height=hatch_height-(config.GrabPointCalculationConfig_170.limited_height*floor_height)
-                x_dump_truck=config.GrabPointCalculationConfig_170.x_dump_truck
-                y_dump_truck=config.GrabPointCalculationConfig_170.y_dump_truck
-                limited_change_height_land=config.GrabPointCalculationConfig_170.limited_change_height_land
-                limited_change_height_ocean=config.GrabPointCalculationConfig_170.limited_change_height_ocean
-                limited_change_height_land_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_land_x_dump
-                limited_change_height_ocean_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_ocean_x_dump
-                limited_change_height_normal_x_dump=config.GrabPointCalculationConfig_170.limited_change_height_normal_x_dump
+                limited_layers=config.GrabPointCalculationConfig_160.limited_layers
+                limited_height=hatch_height-(config.GrabPointCalculationConfig_160.limited_height*floor_height)
+                x_dump_truck=config.GrabPointCalculationConfig_160.x_dump_truck
+                y_dump_truck=config.GrabPointCalculationConfig_160.y_dump_truck
+                limited_change_height_land=config.GrabPointCalculationConfig_160.limited_change_height_land
+                limited_change_height_ocean=config.GrabPointCalculationConfig_160.limited_change_height_ocean
+                limited_change_height_land_x_dump=config.GrabPointCalculationConfig_160.limited_change_height_land_x_dump
+                limited_change_height_ocean_x_dump=config.GrabPointCalculationConfig_160.limited_change_height_ocean_x_dump
+                limited_change_height_normal_x_dump=config.GrabPointCalculationConfig_160.limited_change_height_normal_x_dump
                 
-                limited_layers_y_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_y_dump_truck
-                limited_layers_x_dump_truck=config.GrabPointCalculationConfig_170.limited_layers_x_dump_truck
-                max_height_var_change=config.GrabPointCalculationConfig_170.max_height_var_change
-                land_to_centerline=config.GrabPointCalculationConfig_170.land_to_centerline
-                ocean_to_centerline=config.GrabPointCalculationConfig_170.ocean_to_centerline
-                y_offset_layer=config.GrabPointCalculationConfig_170.y_offset_layer
-                y_offset_land=config.GrabPointCalculationConfig_170.y_offset_land
-                y_offset_ocean=config.GrabPointCalculationConfig_170.y_offset_ocean
-                y_offset_land_xy_dump=config.GrabPointCalculationConfig_170.y_offset_land_xy_dump
-                y_offset_ocean_xy_dump=config.GrabPointCalculationConfig_170.y_offset_ocean_xy_dump
+                limited_layers_y_dump_truck=config.GrabPointCalculationConfig_160.limited_layers_y_dump_truck
+                limited_layers_x_dump_truck=config.GrabPointCalculationConfig_160.limited_layers_x_dump_truck
+                max_height_var_change=config.GrabPointCalculationConfig_160.max_height_var_change
+                land_to_centerline=config.GrabPointCalculationConfig_160.land_to_centerline
+                ocean_to_centerline=config.GrabPointCalculationConfig_160.ocean_to_centerline
+                y_offset_layer=config.GrabPointCalculationConfig_160.y_offset_layer
+                y_offset_land=config.GrabPointCalculationConfig_160.y_offset_land
+                y_offset_ocean=config.GrabPointCalculationConfig_160.y_offset_ocean
+                y_offset_land_xy_dump=config.GrabPointCalculationConfig_160.y_offset_land_xy_dump
+                y_offset_ocean_xy_dump=config.GrabPointCalculationConfig_160.y_offset_ocean_xy_dump
 
 
 

@@ -9,7 +9,7 @@ import os
 import struct
 
 
-HEADER_FORMAT = "<4s HHHHIIdd II QQ IIII 3d 12d 12d 15d I 6d 15b"
+HEADER_FORMAT = "<4s HHHHIIIdd II QQ IIII 3d 12d 12d 15d I 6d 15b"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POINT_FORMAT = "<iiiBB"
 POINT_SIZE = struct.calcsize(POINT_FORMAT)
@@ -61,7 +61,7 @@ class GrabPointCalculationConfig_170:
     BROADCAST_PORT = 8765  # 使用不同的端口避免冲突
 
 
-    VIS_ORIGINAL_3D = True  # 可视化原始点云
+    VIS_ORIGINAL_3D = False  # 可视化原始点云
     VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
     VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
     VISUALIZE_FINAL_RESULT = False      # 可视化最终结果
