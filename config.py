@@ -61,15 +61,16 @@ class GrabPointCalculationConfig_170:
     BROADCAST_PORT = 8765  # 使用不同的端口避免冲突
 
 
-    VIS_ORIGINAL_3D = False  # 可视化原始点云
-    VISUALIZE_COARSE_FILTRATION = False   # 可视化粗过滤结果
-    VISUALIZE_RECTANGLE = False  # 可视化矩形检测过程
-    VISUALIZE_FINAL_RESULT = False      # 可视化最终结果
+    VIS_ORIGINAL_3D = True  # 可视化原始点云
+    VISUALIZE_COARSE_FILTRATION = True   # 可视化粗过滤结果
+    VISUALIZE_RECTANGLE = True  # 可视化矩形检测过程
+    VISUALIZE_FINAL_RESULT = True      # 可视化最终结果
     visualize_clustered_pcd = False  # 可视化聚类后的结果
     visualize_coal_points = False  # 可视化煤堆点
 
     # 安装参数
-    translation = [1.58, 24.324, 31.4]
+    translation = [1.58, 24.824, 31.4]
+    #translation = [1.58, 24.324, 31.4]
         
     # 旋转角度 [roll, pitch, yaw] 
     rotation_angles = [-6.05, 0.15, 0]
@@ -77,7 +78,7 @@ class GrabPointCalculationConfig_170:
     # 粗过滤coarse_filtration_point_cloud函数的参数
     x_initial_threshold=10.0 
     x_stat_percentage=0.3
-    x_filter_offset=3
+    x_filter_offset=2.5
     intensity_threshold=10.0 #强度
     x_upper_bound_adjustment=0
 
@@ -141,7 +142,7 @@ class GrabPointCalculationConfig_170:
     land_to_centerline=1  #距离中心线的距离阈值，判断是否在陆侧
     ocean_to_centerline=1  #距离中心线的距离阈值，判断是否在海侧
 
-    max_height_var_change=1 #方差改变高度的最大值
+    max_height_var_change=1.5 #方差改变高度的最大值
 
 
     #小车方向甩斗，开启y坐标的偏移的层
@@ -208,15 +209,16 @@ class GrabPointCalculationConfig_160:
     visualize_coal_points = False  # 可视化煤堆点
 
     # 安装参数
-    translation = [1.58, 24.324, 31.4]
+    translation = [1.58, 24.824, 31.4]
+    #translation = [1.58, 24.324, 31.4]
         
     # 旋转角度 [roll, pitch, yaw] 
-    rotation_angles = [0, 0.15, 0]
+    rotation_angles = [-0.3, 0.15, 180]
 
     # 粗过滤coarse_filtration_point_cloud函数的参数
     x_initial_threshold=10.0 
     x_stat_percentage=0.3
-    x_filter_offset=3
+    x_filter_offset=2.5
     intensity_threshold=10.0 #强度
     x_upper_bound_adjustment=0
 

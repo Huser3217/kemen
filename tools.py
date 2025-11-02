@@ -3498,9 +3498,12 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         logger.info(f"这{window_size_y*(line_width/block_width)}块是平面的")
         if Sign==1:
             if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
-
-                avg_height = max_height + min(k * height_var + b, max_height_var_change)
-                logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
+                if y_dump_truck_flag and not x_dump_truck_flag:
+                    avg_height = max_height
+                    logger.info(f"小车方向甩斗，取最高高度")
+                else:
+                    avg_height = max_height + min(k * height_var + b, max_height_var_change)
+                    logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
             else:
                 avg_height = best_avg_height + min(k * height_var + b, max_height_var_change)
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
@@ -3516,8 +3519,12 @@ def calculate_capture_point(world_coal_pile_points, lines_dict, current_line,
         logger.info(f"这{window_size_y*(line_width/block_width)}块是斜面的")
         if Sign==1:
             if enable_limited_flag and (y_dump_truck_flag or x_dump_truck_flag):
-                avg_height = max_height + min(k * height_var + b, max_height_var_change)
-                logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
+                if y_dump_truck_flag and not x_dump_truck_flag:
+                    avg_height = max_height
+                    logger.info(f"小车方向甩斗，取最高高度")
+                else:
+                    avg_height = max_height + min(k * height_var + b, max_height_var_change)
+                    logger.info(f"高度改变了{k*height_var+b}米，改变前为{max_height}，改变后为{avg_height}")
             else:
                 avg_height = best_avg_height + min(k * height_var + b, max_height_var_change)
                 logger.info(f"高度改变了{k*height_var+b}米，改变前为{best_avg_height}，改变后为{avg_height}")
