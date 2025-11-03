@@ -473,6 +473,9 @@ async def main():
                 #计算当前煤面在哪一层
                 current_layer = math.ceil(height_diff / floor_height)
                 logger.info(f"当前煤面在第{current_layer}层")
+
+                if current_layer>=7:
+                    config_height_diff=config.GrabPointCalculationConfig_170.change_line_height
                 #计算安全边界
                 if current_layer<=4:
                     safe_distance_x_negative=safe_distance_x_negative_init-((current_layer-1)*expansion_x_front)

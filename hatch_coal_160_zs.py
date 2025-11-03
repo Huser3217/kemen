@@ -207,7 +207,7 @@ async def main():
                     world_center_result = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)
                     world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
                     # world_center_x,world_center_y,world_center_last_machine_positionz = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
-                    world_center_x = world_center_x+(-current_machine_position)
+                    world_center_x = world_center_x+(last_machine_position-current_machine_position)
                     world_point = np.array([
                         [world_center_x,world_center_y,world_center_z]
                     ])
@@ -271,9 +271,29 @@ async def main():
                     [x2, y2, z2],  # 第二个点
                     [x3, y3, z3],  # 第三个点
                     [x4, y4, z4],  # 第四个点
-                ])         
+                ])
+
                 
                 points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
+                
+                # 重新排列四个点：x最小y最小、x最小y最大、x最大y最大、x最大y最小
+                x_min, x_max = np.min(points_world[:, 0]), np.max(points_world[:, 0])
+                y_min, y_max = np.min(points_world[:, 1]), np.max(points_world[:, 1])
+                
+                reordered_points = np.zeros_like(points_world)
+                for point in points_world:
+                    x, y = point[0], point[1]
+                    if np.isclose(x, x_min, atol=0.1) and np.isclose(y, y_min, atol=0.1):
+                        reordered_points[0] = point
+                    elif np.isclose(x, x_min, atol=0.1) and np.isclose(y, y_max, atol=0.1):
+                        reordered_points[1] = point
+                    elif np.isclose(x, x_max, atol=0.1) and np.isclose(y, y_max, atol=0.1):
+                        reordered_points[2] = point
+                    elif np.isclose(x, x_max, atol=0.1) and np.isclose(y, y_min, atol=0.1):
+                        reordered_points[3] = point
+                points_world = reordered_points
+
+
                 points_world_z=(points_world[0][2]+points_world[1][2]+points_world[2][2]+points_world[3][2])/4
                 #改变世界坐标系下的z坐标
                 points_world[:,2]=points_world_z
@@ -852,13 +872,13 @@ async def main():
 
 
 
-                if current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
-                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
-                if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion2
+                    if current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
+                        y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
+                    if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                        y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion2
 
-                if current_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
-                    y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion3
+                    if current_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                        y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion3
 
                     y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                     y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion

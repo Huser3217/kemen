@@ -2500,7 +2500,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
                 world_corner2_x, world_corner2_y, world_corner2_z,
                 world_corner3_x, world_corner3_y, world_corner3_z,
                 world_corner4_x, world_corner4_y, world_corner4_z,
-                lineWidth,floorHeight,safeDistanceXNegativeInit,safeDistanceXPositiveInit,safeDistanceY0ceanInit,safeDistanceYLandInit,
+                lineWidth,floorHeight,safeDistanceXNegativeInit,safeDistanceXPositiveInit,safeDistanceYOceanInit,safeDistanceYLandInit,
                 hatchDepth,retainHeight,lineGap,expansionXFront,expansionYFront,expansionXBack,expansionYBack,
                 planeThreshold,heightDiff,signFlag,kValue,bValue,planeDistance,bevelDistance,blockWidth,blockLength,
                 block1_selection,block2_selection,block3_selection,block4_selection,
@@ -2568,7 +2568,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
     print(f"  floorHeight: {floorHeight}")
     print(f"  safeDistanceXNegativeInit: {safeDistanceXNegativeInit}")
     print(f"  safeDistanceXPositiveInit: {safeDistanceXPositiveInit}")
-    print(f"  safeDistanceY0ceanInit: {safeDistanceY0ceanInit}")
+    print(f"  safeDistanceYOceanInit: {safeDistanceYOceanInit}")
     print(f"  safeDistanceYLandInit: {safeDistanceYLandInit}")
     print(f"  hatchDepth: {hatchDepth}")
     print(f"  retainHeight: {retainHeight}")
@@ -2686,7 +2686,7 @@ async def parse_point_cloud_data(data: bytes,HEADER_SIZE,POINT_SIZE,HEADER_FORMA
         'floorHeight': floorHeight,
         'safeDistanceXNegativeInit': safeDistanceXNegativeInit,
         'safeDistanceXPositiveInit': safeDistanceXPositiveInit,
-        'safeDistanceY0ceanInit': safeDistanceY0ceanInit,
+        'safeDistanceYOceanInit': safeDistanceYOceanInit,
         'safeDistanceYLandInit': safeDistanceYLandInit,
         'hatchDepth': hatchDepth,
         'retainHeight': retainHeight,
