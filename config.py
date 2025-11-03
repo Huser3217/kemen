@@ -250,16 +250,17 @@ class GrabPointCalculationConfig_160:
 
     
     limited_layers=6  #开启海陆侧甩斗限制的层数
-    limited_height=4.5  #限制的层数高度
+    limited_height=4.25  #限制的层数高度
 
-    limited_change_height_land=1.4  #陆侧甩斗向上加一定距离
-    limited_change_height_ocean=2.8  #海侧甩斗向上加一定距离
+    limited_change_height_land=1  #陆侧甩斗向上加一定距离
+    limited_change_height_ocean=1.2  #海侧甩斗向上加一定距离
 
 
         #大车甩斗
-    limited_change_height_land_x_dump=0.4  #陆侧甩斗向上加一定距离
-    limited_change_height_ocean_x_dump=1  #海侧甩斗向上加一定距离
-    limited_change_height_normal_x_dump=1 #大车甩，小车不甩 ，向上加一定高度
+    limited_change_height_land_x_dump=0  #0.4陆侧甩斗向上加一定距离
+    limited_change_height_ocean_x_dump=0  #1海侧甩斗向上加一定距离
+    limited_change_height_normal_x_dump=0 #1大车甩，小车不甩 ，向上加一定高度
+    
 
     #小车方向甩斗的限制层数
     limited_layers_y_dump_truck=4
@@ -286,7 +287,7 @@ class GrabPointCalculationConfig_160:
     land_to_centerline=1  #距离中心线的距离阈值，判断是否在陆侧
     ocean_to_centerline=1  #距离中心线的距离阈值，判断是否在海侧
 
-    max_height_var_change=1 #方差改变高度的最大值
+    max_height_var_change=0.8 #1.5方差改变高度的最大值
 
 
     #小车方向甩斗，开启y坐标的偏移的层
@@ -295,5 +296,8 @@ class GrabPointCalculationConfig_160:
     y_offset_ocean=3
 
     #大车小车同时甩斗，y坐标的偏移
-    y_offset_land_xy_dump=0.2 #陆侧
-    y_offset_ocean_xy_dump=0.8 #海侧
+    y_offset_land_xy_dump=0.4 #陆侧
+    y_offset_ocean_xy_dump=0.2 #海侧
+
+    #煤面第七层以下的换线高度
+    change_line_height=2

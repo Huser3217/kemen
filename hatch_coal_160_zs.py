@@ -208,6 +208,7 @@ async def main():
                     world_center_x, world_center_y, world_center_z = world_center_result[0][0], world_center_result[0][1], world_center_result[0][2]
                     # world_center_x,world_center_y,world_center_last_machine_positionz = lidar_to_world_with_x(hatch_point,translation,0,rotation_angles)[0]
                     world_center_x = world_center_x+(last_machine_position-current_machine_position)
+
                     world_point = np.array([
                         [world_center_x,world_center_y,world_center_z]
                     ])
@@ -271,12 +272,11 @@ async def main():
                     [x2, y2, z2],  # 第二个点
                     [x3, y3, z3],  # 第三个点
                     [x4, y4, z4],  # 第四个点
-                ])
-
+                ])         
                 
                 points_world = lidar_to_world_with_x(points_lidar,translation,current_machine_position, rotation_angles)
-                
-                # 重新排列四个点：x最小y最小、x最小y最大、x最大y最大、x最大y最小
+
+                                # 重新排列四个点：x最小y最小、x最小y最大、x最大y最大、x最大y最小
                 x_min, x_max = np.min(points_world[:, 0]), np.max(points_world[:, 0])
                 y_min, y_max = np.min(points_world[:, 1]), np.max(points_world[:, 1])
                 
@@ -292,8 +292,7 @@ async def main():
                     elif np.isclose(x, x_max, atol=0.1) and np.isclose(y, y_min, atol=0.1):
                         reordered_points[3] = point
                 points_world = reordered_points
-
-
+                
                 points_world_z=(points_world[0][2]+points_world[1][2]+points_world[2][2]+points_world[3][2])/4
                 #改变世界坐标系下的z坐标
                 points_world[:,2]=points_world_z
@@ -492,6 +491,9 @@ async def main():
                 #计算当前煤面在哪一层
                 current_layer = math.ceil(height_diff / floor_height)
                 logger.info(f"当前煤面在第{current_layer}层")
+
+                if current_layer>=7:
+                    config_height_diff=config.GrabPointCalculationConfig_160.change_line_height
                 #计算安全边界
                 if current_layer<=4:
                     safe_distance_x_negative=safe_distance_x_negative_init-((current_layer-1)*expansion_x_front)
@@ -847,6 +849,9 @@ async def main():
                 # 计算当前线在哪一层
                 current_line_layer = math.ceil(abs(hatch_height - current_line_height) / floor_height)
 
+
+                logger.info(f"当前线在{current_line_layer}层")
+
                 if current_line_layer!=current_layer:
                     if current_line_layer<=4:
                         safe_distance_y_ocean=safe_distance_y_ocean_init-((current_line_layer-1)*expansion_y_front)
@@ -872,17 +877,33 @@ async def main():
 
 
 
-                    if current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
+                    if current_line_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer:
                         y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion
-                    if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    if config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer<=current_line_layer<config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
                         y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion2
 
-                    if current_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
+                    if current_line_layer>=config.GrabPointCalculationConfig_160.y_grab_expansion_change_layer2:
                         y_grab_expansion=config.GrabPointCalculationConfig_160.y_grab_expansion3
 
                     y_ocean=min(points_world[1][1],points_world[2][1])-safe_distance_y_ocean+y_grab_expansion
                     y_land=max(points_world[0][1],points_world[3][1])+safe_distance_y_land-y_grab_expansion
+                    logger.info(f"(points_world[1][1]{points_world[1][1]}")
+                    logger.info(f"(points_world[2][1]{points_world[2][1]}")
+                    logger.info(f"(min(points_world[1][1],points_world[2][1]){min(points_world[1][1],points_world[2][1])}")
 
+                    
+                    logger.info(f"(safe_distance_y_ocean{safe_distance_y_ocean}")
+                    logger.info(f"(y_grab_expansion{y_grab_expansion}")
+                    logger.info(f"(points_world[0][1]{points_world[0][1]}")
+                    logger.info(f"(points_world[3][1]{points_world[3][1]}")
+                    logger.info(f"(max(points_world[0][1],points_world[3][1]){max(points_world[0][1],points_world[3][1])}")
+                    logger.info(f"(safe_distance_y_land{safe_distance_y_land}")
+
+                    
+                    
+
+                    logger.info(f"y_ocean为：{y_ocean}")
+                    logger.info(f"y_land为：{y_land}")
 
                     square_ranges=[]
                     grid_block_heights=[]
@@ -898,7 +919,7 @@ async def main():
                     block_length=block_length,
                     x_grid_num=x_grid_num,
                     y_grid_num=y_grid_num
-                      )
+                        )
 
 
 
@@ -1096,13 +1117,39 @@ async def main():
                     )
                     capture_point_layer_min_height=hatch_height-(capture_point_layer*floor_height)
                     capture_point_effective=1
+                    if current_line_layer>4 and capture_point_layer<=4 and (abs(capture_point['y']-y_front)<3.6 or abs(capture_point['y']-y_back)<3.6):
+                        #如果距离 y_front比距离y_back更近
+                        if abs(capture_point['y']-y_front)<abs(capture_point['y']-y_back):
+                            capture_point['y']=y_front-3.6
+                        else:
+                            capture_point['y']=y_back+3.6
+                    
+                    if current_line_layer<=5 and (abs(capture_point['x']-x_left)<2.5 or abs(capture_point['x']-x_right)<2.5):
+                        #如果距离 x_left比距离x_right更近
+                        if abs(capture_point['x']-x_left)<abs(capture_point['x']-x_right):
+                            capture_point['x']=x_left+2.5
+                        else:
+                            capture_point['x']=x_right-2.5
+
                     # 计算第二个抓取点，排除第一个抓取点的区域（递减屏蔽半径）
                     capture_point2, capture_point2_layer = calculate_capture_point_with_backoff(
                         capture_point['x'],
                         capture_point['y']
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
+                    if current_line_layer>4 and capture_point2_layer<=4 and (abs(capture_point2['y']-y_front)<3 or abs(capture_point2['y']-y_back)<3):
+                        #如果距离 y_front比距离y_back更近
+                        if abs(capture_point2['y']-y_front)<abs(capture_point2['y']-y_back):
+                            capture_point2['y']=y_front-3.6
+                        else:
+                            capture_point2['y']=y_back+3.6
 
+                    if current_line_layer<=5 and (abs(capture_point2['x']-x_left)<2.5 or abs(capture_point2['x']-x_right)<2.5):
+                        #如果距离 x_left比距离x_right更近
+                        if abs(capture_point2['x']-x_left)<abs(capture_point2['x']-x_right):
+                            capture_point2['x']=x_left+2.5
+                        else:
+                            capture_point2['x']=x_right-2.5
 
 
                 else:
@@ -1116,6 +1163,22 @@ async def main():
                         last_capture_point_y
                     )
                     capture_point2_layer_min_height=hatch_height-(capture_point2_layer*floor_height)
+                    if current_line_layer>4 and capture_point2_layer<=4 and (abs(capture_point2['y']-y_front)<3 or abs(capture_point2['y']-y_back)<3):
+                        #如果距离 y_front比距离y_back更近
+                        if abs(capture_point2['y']-y_front)<abs(capture_point2['y']-y_back):
+                            capture_point2['y']=y_front-3.6
+                        else:
+                            capture_point2['y']=y_back+3.6
+                    
+                    if current_line_layer<=5 and (abs(capture_point2['x']-x_left)<2.5 or abs(capture_point2['x']-x_right)<2.5):
+                        #如果距离 x_left比距离x_right更近
+                        if abs(capture_point2['x']-x_left)<abs(capture_point2['x']-x_right):
+                            capture_point2['x']=x_left+2.5
+                        else:
+                            capture_point2['x']=x_right-2.5
+
+
+
                     # if abs(capture_point2['x']-capture_point['x'])<0.5:
                     #   logger.info(f'使用上次的抓取点的x坐标{capture_point["x"]}')
                     #   capture_point2['x']=capture_point['x']
